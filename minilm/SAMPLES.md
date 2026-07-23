@@ -70,3 +70,62 @@ import locations as a backward/encode"
 ## Honest read
 
 The samples are convincingly **Python-shaped** — valid `def`/`class` headers, correct indentation, `self`-methods, docstrings, keywords — but not executable programs. That's expected for a tiny char-level model at this scale. It is a real, from-scratch code language model; scale it up (see `GPU.md`) for stronger output.
+
+
+---
+
+# Bigger model (10.78M) — partial run, finish on GPU
+
+A larger model (6 layers, 384-wide, 10.78M params) on the expanded 10.4 MB corpus, trained to **step 3000 of 12000** on CPU before handing off to GPU (see `GPU.md` §4b). Loss here is on the harder 10.4 MB corpus, so it is **not** comparable to the small model's numbers above.
+
+| step | train | val (nats) |
+|---|---|---|
+| 0 | 5.224 | 5.254 |
+| 250 | 2.252 | 2.309 |
+| 500 | 1.730 | 1.833 |
+| 750 | 1.409 | 1.529 |
+| 1000 | 1.267 | 1.384 |
+| 1250 | 1.135 | 1.290 |
+| 1500 | 1.055 | 1.230 |
+| 1750 | 1.004 | 1.171 |
+| 2000 | 0.971 | 1.135 |
+| 2250 | 0.923 | 1.111 |
+| 2500 | 0.911 | 1.089 |
+| 2750 | 0.885 | 1.059 |
+| 3000 | 0.867 | 1.049 |
+
+## Samples from the partial big model (step 3000)
+
+### prompt: `'def '`
+
+```python
+def section(section):
+        """Subsection on copies form stite compiles below a perkle
+        number of now opened for perkline, bucklasses.  This no staticod
+        # we nopening we about only list f
+```
+
+### prompt: `'class '`
+
+```python
+class not scheme
+        try:
+            new_response = {}
+    except OSError:
+        # Assertion compatible yets
+            if new_response else None:
+                raise Unknown_responseError("should
+```
+
+### prompt: `'    def __init__(self'`
+
+```python
+    def __init__(self, seet):
+        '''targetterite threads any() callable property for domainsons are completed by
+        a target, arglist.
+        """
+        if self._name is None:
+            self._unpack_target(N
+```
+
+Even undertrained, it emits real Python signatures verbatim (e.g. `def encode(self, input, errors='strict'):` from the codecs module) and more English-word-coherent identifiers than the small model. Finishing it on a GPU takes minutes and yields a clearly stronger model.
