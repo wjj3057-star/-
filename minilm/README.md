@@ -27,13 +27,16 @@ steps, a GPU — and the same code trains a much stronger model.
 ```
 minilm/
 ├── minigpt/
-│   ├── model.py   # GPT: attention + transformer blocks + LM head (from scratch)
-│   ├── data.py    # char tokenizer + batching
-│   ├── train.py   # training loop: AdamW, cosine LR, eval, checkpointing, samples
-│   └── sample.py  # generate code from a checkpoint
+│   ├── model.py      # GPT: attention + transformer blocks + LM head (from scratch)
+│   ├── data.py       # char tokenizer + batching
+│   ├── train.py      # training loop: AdamW, cosine LR, AMP/compile/grad-accum, GPU-ready
+│   ├── sample.py     # plain generation from a checkpoint
+│   ├── reasoning.py  # extended thinking: scratchpad + best-of-N + self-verification
+│   └── think.py      # `minigpt.think` — generate with an effort budget
 ├── data/python_corpus.txt   # built from the local Python stdlib source
-├── out/           # checkpoints (ckpt.pt), vocab.json, train.log
-└── tests/         # architecture + "it actually learns" tests
+├── out/              # checkpoints (ckpt.pt), vocab.json, train.log
+├── GPU.md            # how to train further on your own GPU
+└── tests/            # architecture, learning, and reasoning tests
 ```
 
 ## Setup
@@ -76,6 +79,54 @@ steps, and saves the best checkpoint to `out/ckpt.pt`.
 ```bash
 python -m minigpt.sample --prompt "def fibonacci(n):" --max-new 300
 python -m minigpt.sample --prompt "class " --temperature 0.7 --top-k 40
+```
+
+## Extended thinking 🧠 (test-time compute)
+
+A tiny base model can't reason on its own, but it *can* spend more compute at
+inference to think longer and pick better output. `minigpt.think` adds this with
+an `effort` knob, exactly like production reasoning systems:
+
+```bash
+python -m minigpt.think --prompt "def is_prime(n):" --effort high --show-thinking
+```
+
+Two real mechanisms (see `minigpt/reasoning.py`):
+
+1. **Thinking scratchpad** — before answering, the model drafts a short plan (as
+   code comments); the answer is generated conditioned on the prompt *and* that
+   plan, i.e. more deliberation context.
+2. **Best-of-N + self-verification** — several candidates are sampled and scored
+   by (a) how much valid Python they produce (`ast.parse`) and (b) the model's
+   own confidence (mean token log-prob). The best is returned.
+
+| effort | samples | thinking tokens | ← more effort = longer, deeper |
+|--------|---------|-----------------|-------------------------------|
+| low    | 1  | 0   | fast, one shot |
+| medium | 4  | 48  | |
+| high   | 8  | 96  | |
+| max    | 16 | 192 | slowest, best pick |
+
+The scorer *is* this model grading its own drafts (plus a genuine Python syntax
+check) — nothing is delegated to another model. As the base model trains longer,
+the same machinery yields better selections.
+
+```python
+from minigpt import think, CharTokenizer, GPT, GPTConfig
+# result = think(model, tok, "def quicksort(a):", effort="max")
+# result.answer / result.best.validity / result.candidates
+```
+
+## Train further on your own GPU
+
+The same code trains on a GPU with mixed precision, `torch.compile`, and
+gradient accumulation — typically 20–100× faster than CPU. Full guide:
+**[GPU.md](GPU.md)**. Quick version:
+
+```bash
+pip install torch --index-url https://download.pytorch.org/whl/cu121
+python -m minigpt.train --resume --device cuda --amp --compile \
+    --max-steps 40000 --eval-interval 1000
 ```
 
 ## Model
