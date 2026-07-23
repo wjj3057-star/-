@@ -8,3 +8,6 @@ out/*.tmp
 # transient training artifacts (final slim checkpoint + samples force-added at end)
 out/ckpt.pt
 out/train.log
+out/ckpt_big.pt
+out/vocab_big.json
+out/train_big.log

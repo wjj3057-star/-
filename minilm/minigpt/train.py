@@ -101,7 +101,8 @@ def main():
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
     autocast, amp_dtype, use_scaler = amp_context(device, args.amp)
-    scaler = torch.cuda.amp.GradScaler(enabled=use_scaler)
+    # torch.amp.GradScaler (newer API); device "cuda" is fine even when disabled on CPU
+    scaler = torch.amp.GradScaler("cuda", enabled=use_scaler)
     print(f"device={device} threads={torch.get_num_threads()} "
           f"amp={args.amp} dtype={amp_dtype} compile={args.compile} "
           f"grad_accum={args.grad_accum}")
