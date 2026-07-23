@@ -1,0 +1,22 @@
+[project]
+name = "forge-agent"
+version = "0.1.0"
+description = "A high-performance, coding-specialized AI agent built on Claude Opus 4.8."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "anthropic>=0.69",
+]
+
+[project.scripts]
+forge = "forge_agent.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["forge_agent*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
