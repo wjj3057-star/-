@@ -221,6 +221,15 @@ Covers the tokenizer, forward/loss shapes, generation length and context
 cropping, and a **learning test** that asserts loss drops to <30% of its initial
 value on a learnable stream — i.e. the training actually works.
 
+## Results
+
+Trained 8000 steps (~45 min, 4-core CPU): **validation loss fell from ~7.75 to
+0.36 bits/char**, and the samples went from random noise to convincingly
+Python-shaped code (valid `def`/`class`, correct indentation, `self`-methods,
+docstrings). A ready-to-run checkpoint (`out/ckpt.pt`, 13 MB) is committed, so
+`sample` / `think` / `chat` work out of the box. See **[SAMPLES.md](SAMPLES.md)**
+for the full loss curve and real generations.
+
 ## How training reads
 
 The final loss is cross-entropy in nats/char; divide by ln(2) for bits/char.

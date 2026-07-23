@@ -131,8 +131,12 @@ def main():
     if args.resume:
         ckpt = torch.load(args.out, map_location=device)
         model.load_state_dict(ckpt["model"])
-        optimizer.load_state_dict(ckpt["optimizer"])
-        start_step = ckpt["step"]
+        if ckpt.get("optimizer") is not None:
+            optimizer.load_state_dict(ckpt["optimizer"])
+        else:
+            print("note: checkpoint has no optimizer state (slim/inference "
+                  "checkpoint) — starting the optimizer fresh.")
+        start_step = ckpt.get("step", 0)
         best_val = ckpt.get("best_val", best_val)
         print(f"resumed from step {start_step}")
 

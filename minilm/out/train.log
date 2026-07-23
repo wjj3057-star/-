@@ -1,0 +1,71 @@
+device=cpu threads=4
+vocab_size=216
+train tokens=6,844,679 val tokens=360,246
+parameters=3.25M
+step     0 | train 5.095 | val 5.110 | lr 7.5e-07 | 10s
+  sample: "def AñññË~8îRçjéøϰe_ΰàâвÔDμѣѣѣѣΰΰzrññμβ^U='dμ6züÑznϐẛ{8ìSÁòꙋÖåh’^ιögò<WjQêИüΰëÄΰRβ]–6;cZøÎQ'Ïê”çìéвϰИ~]$ê3 ÝθIOÿϐk=ÔzUµåKãΰiëππ´5ᲀMÝᲅᲅã>siid6sàþÓſ’SÝHHæ5úϰï ϰ6ê"
+step   250 | train 2.362 | val 2.178 | lr 1.9e-04 | 92s
+  sample: 'def sextf):)\n        ulf.d_ereca.ers__lacs):\n                 ect_ce)\n                t_utelfulf._renvexod_omeayf._ck)\n  cke       sd__sele):\n                  '
+step   500 | train 1.984 | val 1.539 | lr 3.0e-04 | 177s
+  sample: 'def _reyytis.ppes wippor.s None meffox f be stor e nand fope\'.\n       """\n         #\nef sepror sesind grobul.pre Amenmpliles ntaterr s orongdote terodur te,\n\n  '
+step   750 | train 1.676 | val 1.126 | lr 3.0e-04 | 259s
+  sample: "def delc mats proded.       # esssbecot is to pathe reedssed.\n        def self._topems = ma.clests.__call__ = '\n\nref declass Nocstal_classs_rusect iaf is is bca"
+step  1000 | train 1.503 | val 0.949 | lr 3.0e-04 | 341s
+  sample: 'def ================================ co[ n(s)\n    def =========================([][1]]\n                       (" 1,  ccontext.get_wrearr("key))\n                '
+step  1250 | train 1.372 | val 0.831 | lr 2.9e-04 | 422s
+  sample: "def chat self.gromuled)\n            '.juin('\\x82'                   buggcatched.appiler()\n                                                                      "
+step  1500 | train 1.283 | val 0.706 | lr 2.9e-04 | 515s
+  sample: 'def to call_onther are if to only and atput is an stervewh the\n    printins formations.\n        This and to that tpattive differ compates")\n        eleft:\n     '
+step  1750 | train 1.217 | val 0.646 | lr 2.8e-04 | 618s
+  sample: 'def _chunk(self, manage):\n        """All new the are in the are _match and doess arer (finalized method any an file\n        long = containually = """\n          '
+step  2000 | train 1.177 | val 0.572 | lr 2.7e-04 | 703s
+  sample: 'def the "grout defined was Phen content of the last: may properting which provided thet the type lead with-data in that into the\n    system.\n\n\n\n""""COMM ite fix'
+step  2250 | train 1.149 | val 0.542 | lr 2.6e-04 | 785s
+  sample: "def write(self):\n        ''''\n        try:\n            try:\n                if not self._maake_numpare.classes:\n                f'\n            if hasattr(lc, 'l"
+step  2500 | train 1.093 | val 0.518 | lr 2.5e-04 | 865s
+  sample: "def __decode__(self):\n        return decode(self) + decode -> 1, decode\n        if encode in code is None:\n            return error('codecs')\n\n    def __code__("
+step  2750 | train 1.046 | val 0.471 | lr 2.4e-04 | 947s
+  sample: 'def wash(*args):\n                return result\n            self._write(self, optimize=Name)\n\n    def __iter__(self):\n        """Farse Nthe commar to command fro'
+step  3000 | train 1.035 | val 0.446 | lr 2.3e-04 | 1032s
+  sample: 'def are partialing is and only read.\n        """\n        return readings.unpack(fd, module=module_args)\n\nclass FileSendviron(module):\n    """Executable function'
+step  3250 | train 1.007 | val 0.418 | lr 2.2e-04 | 1116s
+  sample: 'def _as_synctring_to_gets(self, 1):\n        """Internal as futures of the future set in possible defaults.\n        """\n        return self._set_yethout < 1)\n   '
+step  3500 | train 0.978 | val 0.396 | lr 2.0e-04 | 1203s
+  sample: 'def is_traceback(objt):\n    """\n    a = _traceback - _traceback_is for _traceback is sequence False needed\n     if _traceback_track is None:\n        if not cons'
+step  3750 | train 0.953 | val 0.363 | lr 1.9e-04 | 1298s
+  sample: "def asystements:\n                # The user construction file for encoding that shut value or in 'self'\n                # the spawn to contains accontrollett in"
+step  4000 | train 0.934 | val 0.360 | lr 1.8e-04 | 1378s
+  sample: 'def actory(excepty):\n        """Tool actual or destring returndencoding a state."""\n        return j  == \'mtime-so first != False or deltainly as firstfuct proc'
+step  4250 | train 0.924 | val 0.343 | lr 1.6e-04 | 1456s
+  sample: 'def signal(fullname):\n            fullname = fullname\n            future = fullname\n        else:\n            fut = signal_fullnames[-1]\n            try:\n      '
+step  4500 | train 0.898 | val 0.335 | lr 1.5e-04 | 1538s
+  sample: 'def resume_linenounders(cls, lineno, byteStreamReader, callback, self._lineno, multiprocessing)\n\n    @classsmethod\n    def control_for_result(self, format=False'
+step  4750 | train 0.891 | val 0.319 | lr 1.3e-04 | 1619s
+  sample: 'def compile(self, policy=None):\n        """Set call for policy one of sintal specific compiler.\n        If the policy file seting parameter (name, spec).\n      '
+step  5000 | train 0.887 | val 0.306 | lr 1.2e-04 | 1703s
+  sample: 'def = self.reset()\n        return n_result\n\n    def _repr_repolation(self):\n        mod._repr_info("modified whethere code objects; data, new) -> mode\n        m'
+step  5250 | train 0.879 | val 0.298 | lr 1.1e-04 | 1787s
+  sample: 'def transform(context):\n            self.transform = treating.transform = transform\n\n    def normal_library_dir(self, filename):\n        """Send a normal-sep on'
+step  5500 | train 0.876 | val 0.297 | lr 9.6e-05 | 1882s
+  sample: 'def get_macros(cm):\n                        this_macros = macros\n                           if this_forkserver:\n                                    neds = nedst'
+step  5750 | train 0.854 | val 0.281 | lr 8.4e-05 | 1959s
+  sample: 'def RETun\'t will be used by the same distributions.\n    EOFError: if the WINDOT string the intere it and with\n    IncrementalEncoding table.\n    """\n\n    __all_'
+step  6000 | train 0.858 | val 0.279 | lr 7.4e-05 | 2041s
+  sample: 'def sequences():\n                return f"{0}?{cls}.{h}:{cls.__queName__} {cls}:}{cls.__class__!ref(cls)\n            encode_test = (True)\n            return Fal'
+step  6250 | train 0.837 | val 0.263 | lr 6.4e-05 | 2123s
+  sample: 'def close(self._fd):\n            return header\n        msg = repr(self._default_flen(self._sock))\n        for n in self._index()\n        return 0\n\n    def close'
+step  6500 | train 0.819 | val 0.272 | lr 5.5e-05 | 2205s
+  sample: 'def _accept(self, newconnected):\n        """Return accepted instead by the connection environment.\n\n        The following is to the function.  Easy exits is the'
+step  6750 | train 0.833 | val 0.266 | lr 4.8e-05 | 2286s
+  sample: 'def send_objects(self, object, cls):\n        if self._end_object:\n            raise ValueError("pathname object class os.path.split(\'.\') in texts.is_module(self'
+step  7000 | train 0.811 | val 0.271 | lr 4.1e-05 | 2368s
+  sample: 'def run_mac_command_length(self, node):\n        raise DistutilsDistutilsOptionError("command \\n" %\n                                           DeprecationWarning'
+step  7250 | train 0.801 | val 0.252 | lr 3.6e-05 | 2450s
+  sample: "def _tz_back_list(self):\n        tz_interpreters._repr_builtins()\n        except EntryPointsError:\n            interpreters[i:i+1] = ''\n            interpreters"
+step  7500 | train 0.804 | val 0.256 | lr 3.3e-05 | 2533s
+  sample: 'def flags(path, flags):\n        method = None\n        # If there directory path to methods of the cache path will request are to remove\n        # etc...  The te'
+step  7750 | train 0.800 | val 0.259 | lr 3.1e-05 | 2615s
+  sample: 'def string(self, sizeof):\n        """This initial method.\n\n        This make the default size of the method of sanition was to a .end block.\n        """\n\n      '
+step  8000 | train 0.790 | val 0.254 | lr 3.0e-05 | 2697s
+  sample: 'def __init__(self, obj.__name__):\n        # __initialize__ must be available object we readsing the\n        # and of the object is about once or the source as a'
+done. best val loss=0.252. checkpoint -> out/ckpt.pt
