@@ -32,7 +32,9 @@ minilm/
 │   ├── train.py      # training loop: AdamW, cosine LR, AMP/compile/grad-accum, GPU-ready
 │   ├── sample.py     # plain generation from a checkpoint
 │   ├── reasoning.py  # extended thinking: scratchpad + best-of-N + self-verification
-│   └── think.py      # `minigpt.think` — generate with an effort budget
+│   ├── think.py      # `minigpt.think` — generate with an effort budget
+│   ├── mathsolve.py  # symbolic math engine (SymPy) — exact high-school+ math
+│   └── chat.py       # `minigpt.chat` — conversational router (chat + math + code)
 ├── data/python_corpus.txt   # built from the local Python stdlib source
 ├── out/              # checkpoints (ckpt.pt), vocab.json, train.log
 ├── GPU.md            # how to train further on your own GPU
@@ -116,6 +118,54 @@ from minigpt import think, CharTokenizer, GPT, GPTConfig
 # result = think(model, tok, "def quicksort(a):", effort="max")
 # result.answer / result.best.validity / result.candidates
 ```
+
+## Talk to it: chat + exact math 💬➗
+
+The model is small and can't hold a general conversation or do reliable
+arithmetic on its own — so, exactly like production assistants that call tools,
+`minigpt.chat` is a **neuro-symbolic** front-end that routes each message:
+
+- **Simple communication** (greetings, "who are you", help, thanks) → intent
+  rules. Answers in Korean when you write Korean, English otherwise.
+- **Math** → a real symbolic engine (**SymPy**, `minigpt/mathsolve.py`) that
+  gives *exact, correct* answers to high-school-and-up math.
+- **Code** → the trained neural model's extended-thinking generator.
+
+```bash
+python -m minigpt.chat                              # interactive
+python -m minigpt.chat --once "integrate x^2 from 0 to 1"
+```
+
+```
+you> 안녕하세요
+bot> 안녕하세요! 저는 작은 도우미예요. 간단한 대화와 정확한 수학 풀이, 코드 생성을 할 수 있어요.
+you> x^2를 0부터 1까지 적분해줘
+bot> ∫[0..1] x**2 dx = 1/3
+you> solve 2x + 3y = 7, x - y = 1
+bot> x = 2, y = 1
+you> limit of (1+1/x)^x as x -> oo
+bot> lim(x→oo) (1 + 1/x)**x = E
+```
+
+### Math engine on its own
+
+`minigpt.mathsolve.solve_math()` (also usable directly) covers:
+
+| Operation | Example | Answer |
+|-----------|---------|--------|
+| solve / systems | `solve x^2 - 5x + 6 = 0` | `x = 2, 3` |
+| complex roots | `solve x^2 + 1 = 0` | `x = -I, I` |
+| derivative | `d/dx sin(x)*x^2` | `x*(x*cos(x) + 2*sin(x))` |
+| definite integral | `integral of x^2 from 0 to 1` | `1/3` |
+| Gaussian integral | `integrate exp(-x^2) from -oo to oo` | `sqrt(pi)` |
+| limit | `limit sin(x)/x as x -> 0` | `1` |
+| factor / expand | `factor x^2 - 5x + 6` | `(x - 3)*(x - 2)` |
+| Taylor series | `series exp(x) to order 5` | `1 + x + x**2/2 + ...` |
+| symbolic sum | `sum k^2 for k = 1 to n` | `n**3/3 + n**2/2 + n/6` |
+
+The scorer and solver are genuine symbolic math — the answers are exact, not
+model guesses. This is the honest way to give a small system real math ability:
+give it a tool, the same pattern frontier agents use.
 
 ## Train further on your own GPU
 
