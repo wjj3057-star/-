@@ -4,3 +4,7 @@ __pycache__/
 *.egg-info/
 out/probe*
 out/*.tmp
+
+# transient training artifacts (final slim checkpoint + samples force-added at end)
+out/ckpt.pt
+out/train.log
