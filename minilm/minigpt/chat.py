@@ -1,17 +1,17 @@
-"""A small conversational front-end for the mini assistant.
+"""The mini assistant's front-end: natural conversation + exact math + code.
 
-This ties the pieces into something you can talk to: it handles simple
-communication (greetings, identity, help, thanks) with intent rules, routes
-math questions to the exact symbolic engine (mathsolve), and routes code
-requests to the trained neural model's extended-thinking generator. It answers
-in Korean when you write Korean, otherwise in English.
+Routing per message:
+  • help / identity  -> stable, accurate answers about what this actually is
+  • code requests    -> the trained neural model's extended-thinking generator
+  • math             -> the exact symbolic engine (mathsolve)
+  • everything else  -> the retrieval + reflection + memory conversation engine
+                        (converse.py), the most human-like chat achievable here
 
-    python -m minigpt.chat            # interactive
+It answers in Korean when you write Korean, otherwise in English, and remembers
+your name across the session.
+
+    python -m minigpt.chat
     python -m minigpt.chat --once "integrate x^2 from 0 to 1"
-
-This is deliberately a *router*, not an open-domain chatbot: the small
-from-scratch model can't hold a general conversation, but the assistant as a
-whole gives correct math, real code generation, and basic dialogue.
 """
 
 from __future__ import annotations
@@ -19,95 +19,64 @@ from __future__ import annotations
 import argparse
 import re
 
+from .converse import ConversationEngine, is_korean
 from .mathsolve import MathError, looks_like_math, solve_math
 
-_HANGUL = re.compile(r"[가-힣]")
-
-
-def _ko(text: str) -> bool:
-    return bool(_HANGUL.search(text))
-
-
-# bilingual canned responses: (english, korean)
-_LINES = {
-    "greeting": (
-        "Hi! I'm a small assistant. I can chat a little, solve math exactly, "
-        "and generate code. Try: 'integrate x^2 from 0 to 1'.",
-        "안녕하세요! 저는 작은 도우미예요. 간단한 대화와 정확한 수학 풀이, 코드 생성을 할 수 있어요. "
-        "예: 'x^2를 0부터 1까지 적분' 또는 'solve x^2-5x+6=0'.",
-    ),
-    "identity": (
-        "I'm minigpt-assistant: a from-scratch neural code model paired with a "
-        "symbolic math engine. The math is exact (SymPy); the code comes from a "
-        "small GPT trained from random init.",
-        "저는 minigpt-assistant예요. 밑바닥부터 학습한 신경망 코드 모델 + 기호수학 엔진의 결합이에요. "
-        "수학은 SymPy로 정확하게 풀고, 코드는 처음부터 학습한 소형 GPT가 생성해요.",
-    ),
-    "help": (
-        "I can:\n"
-        "  • Math  — solve / diff / integrate / limit / factor / expand / series / sum\n"
-        "            e.g. 'solve 2x+3y=7, x-y=1', 'limit sin(x)/x as x->0'\n"
-        "  • Code  — 'write code: def fibonacci(n):'  (uses the trained model)\n"
-        "  • Chat  — greetings, who you are, help, thanks",
-        "할 수 있는 것:\n"
-        "  • 수학 — 방정식/미분/적분/극한/인수분해/전개/급수/합\n"
-        "           예: 'solve 2x+3y=7, x-y=1', '극한 sin(x)/x as x->0'\n"
-        "  • 코드 — 'write code: def fibonacci(n):' (학습된 모델 사용)\n"
-        "  • 대화 — 인사, 정체성, 도움말, 감사",
-    ),
-    "thanks": ("You're welcome!", "천만에요!"),
-    "farewell": ("Bye! 👋", "안녕히 가세요! 👋"),
-    "fallback": (
-        "I'm not sure how to answer that. I'm best at math and code — try "
-        "'help' to see examples.",
-        "그건 잘 모르겠어요. 저는 수학과 코드에 강해요 — 'help'를 입력하면 예시를 볼 수 있어요.",
-    ),
-    "math_error": (
-        "I couldn't parse that math. Try e.g. 'solve x^2 - 4 = 0'.",
-        "그 수식을 이해하지 못했어요. 예: 'solve x^2 - 4 = 0' 처럼 입력해 주세요.",
-    ),
-    "no_model": (
-        "Code generation needs a trained checkpoint (out/ckpt.pt). Train one "
-        "with `python -m minigpt.train`, then ask again.",
-        "코드 생성에는 학습된 체크포인트(out/ckpt.pt)가 필요해요. "
-        "`python -m minigpt.train`으로 학습한 뒤 다시 물어봐 주세요.",
-    ),
-}
-
-
-def _say(key: str, korean: bool) -> str:
-    en, ko = _LINES[key]
-    return ko if korean else en
-
-
-# intent patterns (checked in order); Korean + English cues
-_INTENTS = [
-    ("greeting", r"\b(hi|hello|hey|yo|greetings)\b|안녕|반가|하이"),
-    ("identity", r"who\s+are\s+you|what\s+are\s+you|your\s+name|누구|정체|너\s*뭐|넌\s*뭐|자기소개"),
-    ("help", r"\bhelp\b|what\s+can\s+you|도움말|뭐\s*할\s*수|기능|사용법|메뉴"),
-    ("thanks", r"\b(thanks|thank\s*you|thx)\b|고마|감사"),
-    ("farewell", r"\b(bye|goodbye|see\s*you|quit|exit)\b|잘\s*가|안녕히|종료|나가"),
-]
-
-_CODE_CUE = re.compile(
-    r"\b(code|function|write|implement)\b|코드|함수|짜줘|구현|작성|만들어",
+_HELP_RE = re.compile(
+    r"\bhelp\b|what can you do|도움말|뭐\s*할\s*수|기능|사용법|메뉴", re.IGNORECASE
+)
+_IDENTITY_RE = re.compile(
+    r"who are you|what are you|your name|누구(세요|야)?|정체|너\s*뭐|넌\s*뭐|자기소개",
     re.IGNORECASE,
 )
-_MATH_CUE = re.compile(
-    r"계산|풀어|풀이|미분|적분|극한|인수분해|전개|방정식|급수",
+_CODE_CUE = re.compile(
+    r"\b(code|function|implement)\b|write (me )?(a )?(function|code)|코드|함수|짜줘|구현",
+    re.IGNORECASE,
+)
+_MATH_CUE = re.compile(r"계산|풀어|풀이|미분|적분|극한|인수분해|전개|방정식|급수")
+
+_HELP = (
+    "I can:\n"
+    "  • Chat  — greetings, small talk, how you're feeling; I remember your name\n"
+    "  • Math  — solve / diff / integrate / limit / factor / expand / series / sum\n"
+    "            e.g. 'solve 2x+3y=7, x-y=1', 'limit sin(x)/x as x->0'\n"
+    "  • Code  — 'write code: def fibonacci(n):'  (uses the trained model)",
+    "할 수 있는 것:\n"
+    "  • 대화 — 인사, 잡담, 기분 이야기 (이름도 기억해요)\n"
+    "  • 수학 — 방정식/미분/적분/극한/인수분해/전개/급수/합\n"
+    "           예: 'solve 2x+3y=7, x-y=1', '극한 sin(x)/x as x->0'\n"
+    "  • 코드 — 'write code: def fibonacci(n):' (학습된 모델 사용)",
+)
+_IDENTITY = (
+    "I'm minigpt-assistant: a from-scratch neural code model, an exact symbolic "
+    "math engine, and a retrieval-based conversation engine — all home-built, no "
+    "giant pretrained model behind me. So I chat simply, but my math is exact.",
+    "저는 minigpt-assistant예요. 밑바닥부터 학습한 신경망 코드 모델 + 정확한 기호수학 엔진 "
+    "+ 검색기반 대화 엔진의 결합이에요. 거대한 사전학습 모델은 없어서 대화는 소박하지만, "
+    "수학은 정확해요.",
+)
+_NO_MODEL = (
+    "Code generation needs a trained checkpoint (out/ckpt.pt). Train one with "
+    "`python -m minigpt.train`, then ask again.",
+    "코드 생성에는 학습된 체크포인트(out/ckpt.pt)가 필요해요. "
+    "`python -m minigpt.train`으로 학습한 뒤 다시 물어봐 주세요.",
+)
+_MATH_ERR = (
+    "I couldn't parse that math. Try e.g. 'solve x^2 - 4 = 0'.",
+    "그 수식을 이해하지 못했어요. 예: 'solve x^2 - 4 = 0' 처럼 입력해 주세요.",
 )
 
 
 class Assistant:
     def __init__(self, ckpt: str = "out/ckpt.pt", vocab: str = "out/vocab.json",
-                 code_effort: str = "high"):
+                 code_effort: str = "high", seed: int | None = None):
         self.ckpt = ckpt
         self.vocab = vocab
         self.code_effort = code_effort
+        self.convo = ConversationEngine(seed=seed)
         self._model = None
         self._tok = None
 
-    # lazy: only pay the torch/model cost when a code request arrives
     def _ensure_model(self) -> bool:
         if self._model is not None:
             return True
@@ -126,43 +95,41 @@ class Assistant:
 
     def _code(self, text: str, korean: bool) -> str:
         if not self._ensure_model():
-            return _say("no_model", korean)
+            return _NO_MODEL[korean]
         from .reasoning import think
-        # use the part after a colon as the prompt if present
         prompt = text.split(":", 1)[1].strip() if ":" in text else "def "
-        if not prompt:
-            prompt = "def "
-        result = think(self._model, self._tok, prompt, effort=self.code_effort)
+        result = think(self._model, self._tok, prompt or "def ", effort=self.code_effort)
         header = "생성한 코드" if korean else "generated code"
         return f"[{header}]\n{result.prompt}{result.best.answer}"
 
     def respond(self, text: str) -> str:
-        korean = _ko(text)
+        korean = is_korean(text)
         msg = text.strip()
         if not msg:
-            return _say("fallback", korean)
+            return self.convo.respond(msg)
 
-        # 1) explicit intents
-        for name, pattern in _INTENTS:
-            if re.search(pattern, msg, flags=re.IGNORECASE):
-                return _say(name, korean)
+        # accurate meta answers
+        if _HELP_RE.search(msg):
+            return _HELP[korean]
+        if _IDENTITY_RE.search(msg):
+            return _IDENTITY[korean]
 
-        # 2) code requests -> neural model
+        # code -> neural model
         if _CODE_CUE.search(msg):
             return self._code(msg, korean)
 
-        # 3) math -> symbolic engine
+        # math -> symbolic engine
         if _MATH_CUE.search(msg) or looks_like_math(msg):
             try:
                 return solve_math(_prepare_math(msg)).text
             except MathError:
-                return _say("math_error", korean)
+                return _MATH_ERR[korean]
 
-        # 4) give up gracefully
-        return _say("fallback", korean)
+        # natural conversation
+        return self.convo.respond(msg)
 
 
-# Korean math verb (comes last in a sentence) -> English command (comes first)
+# Korean math verb (comes last) -> English command (comes first)
 _KO_OPS = [
     ("인수분해", "factor"), ("미분", "diff"), ("적분", "integrate"),
     ("극한", "limit"), ("전개", "expand"), ("테일러", "series"),
@@ -172,25 +139,17 @@ _KO_OPS = [
 
 
 def _prepare_math(text: str) -> str:
-    """Turn a Korean/English math request into the engine's command grammar.
-
-    e.g. 'x^2를 0부터 1까지 적분해줘'  ->  'integrate x^2 from 0 to 1'
-         '미분 sin(x)*x^2'            ->  'diff sin(x)*x^2'
-    """
+    """Turn a Korean/English math request into the engine's command grammar."""
     t = text
     op = None
     for ko, en in _KO_OPS:
         if ko in t:
             op = op or en
             t = t.replace(ko, " ")
-    # polite / verb tails
     t = re.sub(r"(해\s*주세요|해줘|구해줘|계산해줘|계산해|계산|구해|알려|하게|하기|해|히|줘|주세요)", " ", t)
-    # "A부터 B까지" -> "from A to B"
     t = re.sub(r"(\S+?)\s*부터\s*(\S+?)\s*까지", r"from \1 to \2", t)
     t = t.replace("무한대", "oo").replace("무한", "oo")
-    # strip trailing Korean particles on tokens
     t = re.sub(r"(를|을|는|은|가|이|의|에서|에게|에|으로|로)(?=\s|$)", " ", t)
-    # English prose
     t = re.sub(r"\b(please|compute|what\s+is|whats|calculate)\b", " ", t, flags=re.IGNORECASE)
     t = re.sub(r"\s+", " ", t).strip(" ?.")
     return f"{op} {t}".strip() if op else t
@@ -215,12 +174,11 @@ def main():
         except (EOFError, KeyboardInterrupt):
             print()
             break
-        if re.search(r"\b(bye|quit|exit)\b|종료|나가", user, re.IGNORECASE):
-            print("bot> " + bot.respond(user))
-            break
         if not user:
             continue
         print("bot> " + bot.respond(user) + "\n")
+        if re.search(r"\b(bye|quit|exit)\b|종료|나가", user, re.IGNORECASE):
+            break
 
 
 if __name__ == "__main__":

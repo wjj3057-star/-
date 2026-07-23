@@ -34,7 +34,8 @@ minilm/
 │   ├── reasoning.py  # extended thinking: scratchpad + best-of-N + self-verification
 │   ├── think.py      # `minigpt.think` — generate with an effort budget
 │   ├── mathsolve.py  # symbolic math engine (SymPy) — exact high-school+ math
-│   └── chat.py       # `minigpt.chat` — conversational router (chat + math + code)
+│   ├── converse.py   # dialogue engine: TF-IDF retrieval + reflection + memory
+│   └── chat.py       # `minigpt.chat` — router (conversation + math + code)
 ├── data/python_corpus.txt   # built from the local Python stdlib source
 ├── out/              # checkpoints (ckpt.pt), vocab.json, train.log
 ├── GPU.md            # how to train further on your own GPU
@@ -119,16 +120,17 @@ from minigpt import think, CharTokenizer, GPT, GPTConfig
 # result.answer / result.best.validity / result.candidates
 ```
 
-## Talk to it: chat + exact math 💬➗
+## Talk to it: conversation + exact math 💬➗
 
-The model is small and can't hold a general conversation or do reliable
-arithmetic on its own — so, exactly like production assistants that call tools,
-`minigpt.chat` is a **neuro-symbolic** front-end that routes each message:
+`minigpt.chat` routes each message and answers in Korean when you write Korean:
 
-- **Simple communication** (greetings, "who are you", help, thanks) → intent
-  rules. Answers in Korean when you write Korean, English otherwise.
-- **Math** → a real symbolic engine (**SymPy**, `minigpt/mathsolve.py`) that
-  gives *exact, correct* answers to high-school-and-up math.
+- **Conversation** → a real dialogue engine (`minigpt/converse.py`): **TF-IDF
+  retrieval** over a bilingual small-talk knowledge base, **ELIZA-style
+  reflection** for open-ended statements, and **memory** (it remembers your
+  name and follows up). This is the most human-like chat achievable without a
+  large pretrained model — see the honest note below.
+- **Math** → a real symbolic engine (**SymPy**, `minigpt/mathsolve.py`) — exact
+  answers to high-school-and-up math.
 - **Code** → the trained neural model's extended-thinking generator.
 
 ```bash
@@ -137,15 +139,31 @@ python -m minigpt.chat --once "integrate x^2 from 0 to 1"
 ```
 
 ```
-you> 안녕하세요
-bot> 안녕하세요! 저는 작은 도우미예요. 간단한 대화와 정확한 수학 풀이, 코드 생성을 할 수 있어요.
+you> hey there
+bot> Hey! Good to see you. How's it going?
+you> my name is Alex
+bot> Nice to meet you, Alex! How can I help?
+you> i think programming is hard
+bot> What makes you think programming is hard?
 you> x^2를 0부터 1까지 적분해줘
 bot> ∫[0..1] x**2 dx = 1/3
-you> solve 2x + 3y = 7, x - y = 1
-bot> x = 2, y = 1
-you> limit of (1+1/x)^x as x -> oo
-bot> lim(x→oo) (1 + 1/x)**x = E
+you> 오늘 좀 우울해
+bot> 이해해요. 가끔은 말로 꺼내는 게 도움이 돼요. 무슨 일이에요?
+you> what is my name?
+bot> You told me your name is Alex.
 ```
+
+### How human-like is the conversation? (honest)
+
+The dialogue engine — retrieval + reflection + memory — makes small talk,
+follows your feelings, and remembers you, so it feels far more like talking to
+someone than a fixed menu of replies. But it is **not** open-domain human-level
+conversation: that requires a large pretrained language model (billions of
+parameters, vast data), which can't be trained from scratch on a CPU. Within a
+home-built project this is the honest ceiling. For genuinely human-like chat,
+plug a large model in behind the same `Assistant.respond()` interface — the
+router, math, and code parts stay exactly as they are. (The sibling `forge/`
+project is the wrap-a-frontier-model path.)
 
 ### Math engine on its own
 
