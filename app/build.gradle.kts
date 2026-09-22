@@ -30,10 +30,6 @@ android {
         }
     }
 
-    buildFeatures {
-        viewBinding = true
-    }
-
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -49,9 +45,8 @@ android {
 }
 
 dependencies {
-    implementation(libs.androidx.core.ktx)
-    implementation(libs.androidx.appcompat)
-    implementation(libs.material)
-    implementation(libs.androidx.constraintlayout)
+    // No androidx or Material Components: at minSdk 33 the framework already provides
+    // everything the UI needs, and keeping the graph empty keeps the APK small and the
+    // view-inflation path free of interceptors.
     testImplementation(libs.junit)
 }

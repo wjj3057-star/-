@@ -137,6 +137,14 @@ gradle wrapper --gradle-version 8.9
 요구사항: Android SDK 35, JDK 17 이상, `minSdk 33` 이상 실기기.
 10-bit 카메라 출력과 HEVC Main10 인코딩은 에뮬레이터에서 동작하지 않습니다.
 
+### 외부 의존성 없음
+
+`minSdk 33`에서는 AppCompat / Material Components / ConstraintLayout / ViewBinding이
+백포트할 것이 남아 있지 않습니다. UI는 전부 프레임워크 API(`Activity`,
+`WindowInsetsController`, `FrameLayout`, `findViewById`)로 되어 있고 런타임 의존성이
+0개입니다. AppCompat은 모든 뷰 인플레이션을 가로채 AppCompat 위젯으로 바꾸는데, 오버레이가
+12개뿐인 저지연 카메라 앱에서는 비용만 남습니다. APK는 **669 KB**입니다.
+
 녹화 파일은 `Movies/IMAXCam/`에 저장됩니다:
 `IMAX_1.43-1_3088x2160_HDR10+_20260922_154312.mp4`
 
@@ -176,10 +184,11 @@ pipeline/  CaptureEngine             전체 파이프라인 + 스레드 수명�
 - `MainActivity.kt`를 제외한 전체 Kotlin 소스가 실제 Android 프레임워크 클래스를 상대로
   경고 없이 컴파일됨 (54 클래스)
 
+- **서명된 디버그 APK 빌드 완료** — aapt2로 리소스 링크, 전체 Kotlin 20개 파일 컴파일,
+  D8 dexing, APK Signature Scheme v3 서명까지. `apksigner verify` 통과, dex에 androidx
+  참조 0건, `findViewById` ID 11개 전부 R에 존재.
+
 **실행하지 못함**
-- **APK 빌드 전체** — 이 환경의 네트워크 정책이 `dl.google.com`을 막고 있어 Android SDK
-  플랫폼을 받을 수 없었습니다. `MainActivity.kt`는 androidx와 생성된 ViewBinding이 필요해
-  타입 체크에서 제외했고, 대신 수동 검토했습니다.
 - **실기기 동작 확인** — 카메라, GL, 코덱 경로는 실제 하드웨어에서만 검증할 수 있습니다.
   특히 기기별로 확인이 필요한 부분: HDR10+ 프로파일의 세션 구성 성공 여부, 인코더가
   3088×2160 / 3840×2022 같은 비표준 크기를 받는지, EGL `BT2020_PQ` 색공간 지원 여부.

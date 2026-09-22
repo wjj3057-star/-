@@ -1,64 +1,66 @@
 package com.imaxcam
 
 import android.Manifest
+import android.app.Activity
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.util.TypedValue
 import android.view.SurfaceHolder
+import android.view.SurfaceView
 import android.view.View
+import android.view.WindowInsets
+import android.view.WindowInsetsController
 import android.view.WindowManager
+import android.widget.Button
+import android.widget.CheckBox
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.ContextCompat
-import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowInsetsControllerCompat
 import com.imaxcam.camera.HdrMode
 import com.imaxcam.core.ImaxFormat
-import com.imaxcam.databinding.ActivityMainBinding
 import com.imaxcam.pipeline.CaptureEngine
 import java.util.Locale
 
-class MainActivity : AppCompatActivity(), CaptureEngine.Listener {
+/**
+ * Single-screen camera UI.
+ *
+ * Deliberately framework-only — no AppCompat, no Material Components, no constraint
+ * solver. At minSdk 33 every API those libraries back-port is already present, and
+ * AppCompat's inflation interceptor would rewrite each of this screen's dozen views for
+ * nothing. All the real work happens in [CaptureEngine]; this class just wires controls
+ * to it and paints the HUD.
+ */
+class MainActivity : Activity(), CaptureEngine.Listener {
 
-    private lateinit var binding: ActivityMainBinding
     private lateinit var engine: CaptureEngine
+
+    private lateinit var preview: SurfaceView
+    private lateinit var hudMode: TextView
+    private lateinit var hudSize: TextView
+    private lateinit var hudLatency: TextView
+    private lateinit var recordTimer: TextView
+    private lateinit var ratioBar: LinearLayout
+    private lateinit var recordButton: Button
+    private lateinit var switchCamera: Button
+    private lateinit var lowLatency: CheckBox
+    private lateinit var stabilization: CheckBox
+    private lateinit var audioEnabled: CheckBox
+
     private val ratioButtons = mutableMapOf<ImaxFormat, TextView>()
     private var surfaceReady = false
-    private var permissionsGranted = false
-
-    private val permissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { result ->
-        permissionsGranted = result[Manifest.permission.CAMERA] == true
-        if (permissionsGranted) {
-            startEngine()
-        } else {
-            Toast.makeText(this, R.string.permission_denied, Toast.LENGTH_LONG).show()
-        }
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        binding = ActivityMainBinding.inflate(layoutInflater)
-        setContentView(binding.root)
-
-        WindowCompat.setDecorFitsSystemWindows(window, false)
-        WindowInsetsControllerCompat(window, binding.root).apply {
-            hide(WindowInsetsCompat.Type.systemBars())
-            systemBarsBehavior =
-                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-        }
+        setContentView(R.layout.activity_main)
+        bindViews()
+        goFullscreen()
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         engine = CaptureEngine(this, this)
         buildRatioBar()
         wireControls()
 
-        binding.preview.holder.addCallback(object : SurfaceHolder.Callback {
+        preview.holder.addCallback(object : SurfaceHolder.Callback {
             override fun surfaceCreated(holder: SurfaceHolder) = Unit
 
             override fun surfaceChanged(
@@ -78,14 +80,38 @@ class MainActivity : AppCompatActivity(), CaptureEngine.Listener {
         })
     }
 
+    private fun bindViews() {
+        preview = findViewById(R.id.preview)
+        hudMode = findViewById(R.id.hudMode)
+        hudSize = findViewById(R.id.hudSize)
+        hudLatency = findViewById(R.id.hudLatency)
+        recordTimer = findViewById(R.id.recordTimer)
+        ratioBar = findViewById(R.id.ratioBar)
+        recordButton = findViewById(R.id.recordButton)
+        switchCamera = findViewById(R.id.switchCamera)
+        lowLatency = findViewById(R.id.lowLatency)
+        stabilization = findViewById(R.id.stabilization)
+        audioEnabled = findViewById(R.id.audioEnabled)
+    }
+
+    private fun goFullscreen() {
+        // The theme's translucent status/navigation flags already let the window lay out
+        // behind the system bars, so only the controller call is needed here.
+        window.insetsController?.apply {
+            hide(WindowInsets.Type.systemBars())
+            systemBarsBehavior =
+                WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        }
+    }
+
     override fun onResume() {
         super.onResume()
-        if (hasPermissions()) {
-            permissionsGranted = true
+        if (hasCameraPermission()) {
             startEngine()
         } else {
-            permissionLauncher.launch(
-                arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO)
+            requestPermissions(
+                arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO),
+                REQUEST_PERMISSIONS
             )
         }
     }
@@ -95,19 +121,27 @@ class MainActivity : AppCompatActivity(), CaptureEngine.Listener {
         super.onPause()
     }
 
-    private fun hasPermissions(): Boolean =
-        ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) ==
-            PackageManager.PERMISSION_GRANTED
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != REQUEST_PERMISSIONS) return
+        if (hasCameraPermission()) {
+            startEngine()
+        } else {
+            Toast.makeText(this, R.string.permission_denied, Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun hasCameraPermission(): Boolean =
+        checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
 
     private fun startEngine() {
         engine.start()
         if (surfaceReady) {
-            val holder = binding.preview.holder
-            engine.attachPreview(
-                holder.surface,
-                binding.preview.width,
-                binding.preview.height
-            )
+            engine.attachPreview(preview.holder.surface, preview.width, preview.height)
         }
     }
 
@@ -116,7 +150,7 @@ class MainActivity : AppCompatActivity(), CaptureEngine.Listener {
     // -------------------------------------------------------------------------------
 
     private fun buildRatioBar() {
-        binding.ratioBar.removeAllViews()
+        ratioBar.removeAllViews()
         ratioButtons.clear()
         ImaxFormat.entries.forEach { format ->
             val chip = TextView(this).apply {
@@ -124,15 +158,13 @@ class MainActivity : AppCompatActivity(), CaptureEngine.Listener {
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
                 setPadding(dp(18), dp(8), dp(18), dp(8))
                 setBackgroundResource(R.drawable.bg_chip)
-                setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
-                isSelected = format == ImaxFormat.DEFAULT
                 setOnClickListener { selectFormat(format) }
             }
             val params = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply { marginEnd = dp(8) }
-            binding.ratioBar.addView(chip, params)
+            ratioBar.addView(chip, params)
             ratioButtons[format] = chip
         }
         selectFormat(ImaxFormat.DEFAULT, notify = false)
@@ -140,30 +172,24 @@ class MainActivity : AppCompatActivity(), CaptureEngine.Listener {
 
     private fun selectFormat(format: ImaxFormat, notify: Boolean = true) {
         ratioButtons.forEach { (key, view) ->
-            view.isSelected = key == format
-            view.setTextColor(
-                ContextCompat.getColor(
-                    this,
-                    if (key == format) R.color.black else R.color.text_primary
-                )
-            )
+            val selected = key == format
+            view.isSelected = selected
+            view.setTextColor(getColor(if (selected) R.color.black else R.color.text_primary))
         }
         if (notify) engine.setFormat(format)
     }
 
     private fun wireControls() {
-        binding.recordButton.setOnClickListener {
+        recordButton.setOnClickListener {
             if (engine.state.recording) {
                 engine.stopRecording()
             } else {
-                engine.startRecording(withAudio = binding.audioEnabled.isChecked)
+                engine.startRecording(withAudio = audioEnabled.isChecked)
             }
         }
-        binding.switchCamera.setOnClickListener { cycleCamera() }
-        binding.lowLatency.setOnCheckedChangeListener { _, checked ->
-            engine.setLowLatency(checked)
-        }
-        binding.stabilization.setOnCheckedChangeListener { _, checked ->
+        switchCamera.setOnClickListener { cycleCamera() }
+        lowLatency.setOnCheckedChangeListener { _, checked -> engine.setLowLatency(checked) }
+        stabilization.setOnCheckedChangeListener { _, checked ->
             engine.setStabilization(checked)
         }
     }
@@ -194,11 +220,14 @@ class MainActivity : AppCompatActivity(), CaptureEngine.Listener {
     override fun onStateChanged(state: CaptureEngine.State) = renderState(state)
 
     private fun renderState(state: CaptureEngine.State) {
-        val dynamic = if (state.hdr10PlusDynamic) " · dynamic" else ""
-        binding.hudMode.text = "${state.hdrMode.label}$dynamic"
+        hudMode.text = if (state.hdr10PlusDynamic) {
+            "${state.hdrMode.label} · dynamic"
+        } else {
+            state.hdrMode.label
+        }
 
         val crop = state.crop
-        binding.hudSize.text = if (crop == null) {
+        hudSize.text = if (crop == null) {
             "--"
         } else {
             String.format(
@@ -208,40 +237,34 @@ class MainActivity : AppCompatActivity(), CaptureEngine.Listener {
             )
         }
 
-        binding.hudLatency.text = String.format(
-            Locale.US,
-            "latency %s  ·  %.1f fps",
-            state.latency.format(),
-            state.renderFps
+        hudLatency.text = String.format(
+            Locale.US, "latency %s  ·  %.1f fps", state.latency.format(), state.renderFps
         )
 
-        binding.recordButton.isSelected = state.recording
-        binding.recordButton.contentDescription = getString(
+        recordButton.isSelected = state.recording
+        recordButton.contentDescription = getString(
             if (state.recording) R.string.record_stop else R.string.record_start
         )
-        binding.recordTimer.visibility = if (state.recording) View.VISIBLE else View.GONE
+        recordTimer.visibility = if (state.recording) View.VISIBLE else View.GONE
         if (state.recording) {
-            val totalSeconds = state.recordedMs / 1000
-            binding.recordTimer.text = String.format(
-                Locale.US, "● %02d:%02d", totalSeconds / 60, totalSeconds % 60
-            )
+            val seconds = state.recordedMs / 1000
+            recordTimer.text =
+                String.format(Locale.US, "● %02d:%02d", seconds / 60, seconds % 60)
         }
-        binding.switchCamera.isEnabled = !state.recording && engine.availableCameras.size > 1
+        switchCamera.isEnabled = !state.recording && engine.availableCameras.size > 1
         ratioButtons.values.forEach { it.isEnabled = !state.recording }
     }
 
     override fun onRecordingStarted(name: String) = Unit
 
     override fun onRecordingStopped(name: String, durationMs: Long, bytes: Long) {
-        val seconds = durationMs / 1000.0
-        val megabytes = bytes / (1024.0 * 1024.0)
         Toast.makeText(
             this,
             getString(
                 R.string.saved,
                 name,
-                String.format(Locale.US, "%.1fs", seconds),
-                String.format(Locale.US, "%.0f MB", megabytes)
+                String.format(Locale.US, "%.1fs", durationMs / 1000.0),
+                String.format(Locale.US, "%.0f MB", bytes / (1024.0 * 1024.0))
             ),
             Toast.LENGTH_LONG
         ).show()
@@ -251,6 +274,9 @@ class MainActivity : AppCompatActivity(), CaptureEngine.Listener {
         Toast.makeText(this, message, Toast.LENGTH_LONG).show()
     }
 
-    private fun dp(value: Int): Int =
-        (value * resources.displayMetrics.density).toInt()
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+
+    private companion object {
+        const val REQUEST_PERMISSIONS = 1
+    }
 }

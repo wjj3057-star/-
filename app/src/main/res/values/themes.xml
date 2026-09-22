@@ -1,10 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.ImaxCam" parent="Theme.Material3.Dark.NoActionBar">
+    <!--
+        Framework Material rather than AppCompat/Material Components: minSdk is 33, so
+        there is nothing left for those libraries to back-port, and AppCompat's inflation
+        interceptor would rewrite every view in the overlay for no benefit.
+    -->
+    <style name="Theme.ImaxCam" parent="@android:style/Theme.Material.NoActionBar">
         <item name="android:windowBackground">@color/black</item>
     </style>
 
-    <style name="Theme.ImaxCam.Fullscreen" parent="Theme.ImaxCam">
+    <style name="Theme.ImaxCam.Fullscreen">
         <item name="android:windowTranslucentStatus">true</item>
         <item name="android:windowTranslucentNavigation">true</item>
         <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
