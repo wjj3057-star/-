@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">IMAX Cam</string>
+
+    <string name="record_start">촬영 시작</string>
+    <string name="record_stop">촬영 중지</string>
+    <string name="switch_camera">카메라 전환</string>
+    <string name="low_latency">저지연</string>
+    <string name="stabilization">손떨림 보정</string>
+    <string name="audio">오디오</string>
+
+    <string name="permission_denied">권한이 거부되어 촬영할 수 없습니다.</string>
+    <string name="no_hdr10_plus">이 기기는 HDR10+ 촬영을 지원하지 않습니다 (%1$s 사용)</string>
+    <string name="saved">저장됨: %1$s (%2$s, %3$s)</string>
+
+</resources>

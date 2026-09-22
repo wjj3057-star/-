@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="black">#FF000000</color>
+    <color name="scrim">#99000000</color>
+    <color name="accent">#FFD54F</color>
+    <color name="record">#FFE53935</color>
+    <color name="text_primary">#FFFFFFFF</color>
+    <color name="text_secondary">#B3FFFFFF</color>
+    <color name="chip_selected">#FFD54F</color>
+    <color name="ic_launcher_background">#FF101014</color>
+</resources>
