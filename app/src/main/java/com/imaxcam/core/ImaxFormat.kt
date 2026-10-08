@@ -25,6 +25,17 @@ enum class ImaxFormat(
     }
 }
 
+/** The selectable camera capture resolution; actual size depends on hardware support. */
+enum class VideoQuality(val label: String, val width: Int, val height: Int) {
+    HD("720p", 1280, 720),
+    FULL_HD("1080p", 1920, 1080),
+    UHD("4K UHD", 3840, 2160);
+
+    companion object {
+        val DEFAULT = FULL_HD
+    }
+}
+
 /**
  * A centred crop of [srcW] x [srcH] that hits a target aspect ratio.
  *
@@ -115,6 +126,27 @@ object CropCalc {
             compareBy<Size> { fit(it, format).pixels }
                 .thenBy { it.width.toLong() * it.height.toLong() }
         )
+    }
+
+    /**
+     * Finds the closest native 16:9 camera output for the selected quality. Never
+     * fabricates a size by scaling a larger stream and never requests an unavailable
+     * SurfaceTexture resolution. The exact negotiated size is shown on the HUD.
+     */
+    fun pickSourceForQuality(candidates: List<Size>, quality: VideoQuality): Size? {
+        if (candidates.isEmpty()) return null
+        val widescreen = candidates.filter {
+            val longEdge = maxOf(it.width, it.height).toDouble()
+            val shortEdge = minOf(it.width, it.height).toDouble()
+            shortEdge > 0 && abs(longEdge / shortEdge - 16.0 / 9.0) < 0.08
+        }
+        val pool = widescreen.ifEmpty { candidates }
+        return pool.minWithOrNull(compareBy<Size> {
+            val longEdge = maxOf(it.width, it.height)
+            val shortEdge = minOf(it.width, it.height)
+            abs(longEdge - quality.width).toLong() * 2 +
+                abs(shortEdge - quality.height).toLong()
+        }.thenBy { abs(it.width.toLong() * it.height - quality.width.toLong() * quality.height) })
     }
 
     /**
