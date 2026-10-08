@@ -134,14 +134,18 @@ class AudioEncoder(
     fun start() {
         val audioRecord = record ?: return
         val encoder = codec ?: return
-        running = true
         encoder.start()
         audioRecord.startRecording()
+        running = true
 
         worker = thread(name = "imax-audio", priority = Thread.MAX_PRIORITY) {
             Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
             runCatching { pump(audioRecord, encoder) }
-                .onFailure { if (running) onError("Audio capture failed", it) }
+                .onFailure {
+                    if (running) onError("Audio capture failed", it)
+                    // A failed microphone must never indefinitely block the video muxer.
+                    muxer.dropAudioTrack()
+                }
         }
     }
 
@@ -150,6 +154,7 @@ class AudioEncoder(
         val bytesPerFrame = 2 * config.channelCount
         var totalFrames = 0L
         var startNanos = -1L
+        var lastPtsUs = System.nanoTime() / 1000L
 
         while (running) {
             val inputIndex = encoder.dequeueInputBuffer(DEQUEUE_TIMEOUT_US)
@@ -163,40 +168,78 @@ class AudioEncoder(
                             startNanos = System.nanoTime() -
                                 (read / bytesPerFrame) * 1_000_000_000L / config.sampleRate
                         }
-                        // Derive PTS from the sample count rather than the wall clock, so
-                        // drift cannot accumulate over a long take.
-                        val ptsUs = (startNanos / 1000) +
+                        // AAC and EGL video timestamps both use CLOCK_MONOTONIC here.
+                        val ptsUs = startNanos / 1000L +
                             totalFrames * 1_000_000L / config.sampleRate
                         totalFrames += read / bytesPerFrame
+                        lastPtsUs = ptsUs
                         encoder.queueInputBuffer(inputIndex, 0, read, ptsUs, 0)
                     } else {
-                        encoder.queueInputBuffer(inputIndex, 0, 0, 0, 0)
+                        encoder.queueInputBuffer(
+                            inputIndex, 0, 0, lastPtsUs + 1L, 0
+                        )
                     }
+                } else {
+                    encoder.queueInputBuffer(inputIndex, 0, 0, lastPtsUs + 1L, 0)
                 }
             }
-
-            var outputIndex = encoder.dequeueOutputBuffer(bufferInfo, 0)
-            while (outputIndex >= 0) {
-                val output = encoder.getOutputBuffer(outputIndex)
-                if (output != null && bufferInfo.size > 0) {
-                    output.position(bufferInfo.offset)
-                    output.limit(bufferInfo.offset + bufferInfo.size)
-                    muxer.writeAudio(output, bufferInfo)
-                }
-                encoder.releaseOutputBuffer(outputIndex, false)
-                outputIndex = encoder.dequeueOutputBuffer(bufferInfo, 0)
-            }
-            if (outputIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                muxer.addAudioTrack(encoder.outputFormat)
-            }
+            drainOutputs(encoder, bufferInfo, 0)
         }
+
+        // Queue a proper AAC EOS after the last PCM sample. Stopping MediaCodec before
+        // this drain used to truncate audio and could leave the MP4 unfinalizable.
+        val eosDeadline = System.nanoTime() + AUDIO_DRAIN_TIMEOUT_NANOS
+        var eosQueued = false
+        var eosReceived = false
+        while (System.nanoTime() < eosDeadline && !eosReceived) {
+            if (!eosQueued) {
+                val index = encoder.dequeueInputBuffer(DEQUEUE_TIMEOUT_US)
+                if (index >= 0) {
+                    encoder.queueInputBuffer(
+                        index, 0, 0, maxOf(lastPtsUs + 1L, System.nanoTime() / 1000L),
+                        MediaCodec.BUFFER_FLAG_END_OF_STREAM
+                    )
+                    eosQueued = true
+                }
+            }
+            eosReceived = drainOutputs(encoder, bufferInfo, DEQUEUE_TIMEOUT_US)
+        }
+        if (!eosReceived) Log.w(TAG, "AAC EOS not received before timeout")
+    }
+
+    /** Returns true after the codec's final output buffer has been received. */
+    private fun drainOutputs(
+        encoder: MediaCodec,
+        info: MediaCodec.BufferInfo,
+        timeoutUs: Long
+    ): Boolean {
+        var index = encoder.dequeueOutputBuffer(info, timeoutUs)
+        while (index >= 0 || index == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+            if (index == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                muxer.addAudioTrack(encoder.outputFormat)
+            } else {
+                val output = encoder.getOutputBuffer(index)
+                if (output != null && info.size > 0) {
+                    output.position(info.offset)
+                    output.limit(info.offset + info.size)
+                    muxer.writeAudio(output, info)
+                }
+                val eos = info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0
+                encoder.releaseOutputBuffer(index, false)
+                if (eos) return true
+            }
+            index = encoder.dequeueOutputBuffer(info, 0)
+        }
+        return false
     }
 
     fun stop() {
         running = false
-        worker?.join(500)
-        worker = null
+        // Interrupt a blocked read before joining; then let the worker send/drain EOS.
         runCatching { record?.stop() }
+        worker?.join(AUDIO_JOIN_TIMEOUT_MS)
+        if (worker?.isAlive == true) Log.w(TAG, "Audio worker did not finish in time")
+        worker = null
         runCatching { codec?.stop() }
     }
 
@@ -211,5 +254,7 @@ class AudioEncoder(
     private companion object {
         const val TAG = "AudioEncoder"
         const val DEQUEUE_TIMEOUT_US = 2_000L
+        const val AUDIO_DRAIN_TIMEOUT_NANOS = 1_500_000_000L
+        const val AUDIO_JOIN_TIMEOUT_MS = 2_000L
     }
 }
