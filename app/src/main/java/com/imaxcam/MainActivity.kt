@@ -5,6 +5,10 @@ import android.app.Activity
 import android.content.pm.PackageManager
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
+import android.os.Handler
+import android.os.Looper
+import android.view.OrientationEventListener
+import android.hardware.SensorManager
 import android.os.Bundle
 import android.util.TypedValue
 import android.view.SurfaceHolder
@@ -20,6 +24,7 @@ import android.widget.TextView
 import android.widget.Toast
 import com.imaxcam.camera.HdrMode
 import com.imaxcam.core.ImaxFormat
+import com.imaxcam.core.OrientationMath
 import com.imaxcam.core.VideoQuality
 import com.imaxcam.pipeline.CaptureEngine
 import java.util.Locale
@@ -55,6 +60,41 @@ class MainActivity : Activity(), CaptureEngine.Listener {
 
     private val ratioButtons = mutableMapOf<ImaxFormat, TextView>()
     private var surfaceReady = false
+    private enum class RotationMode { AUTO, LANDSCAPE, PORTRAIT }
+    private var rotationMode = RotationMode.AUTO
+    private var recordingOrientationLocked = false
+    private val uiHandler = Handler(Looper.getMainLooper())
+    private var queuedQuadrant = -1
+    private var orientationTask: Runnable? = null
+    private val orientationListener by lazy {
+        object : OrientationEventListener(this, SensorManager.SENSOR_DELAY_NORMAL) {
+            override fun onOrientationChanged(orientation: Int) {
+                if (rotationMode != RotationMode.AUTO ||
+                    !::engine.isInitialized || engine.state.recording ||
+                    recordingOrientationLocked) return
+                val quadrant = OrientationMath.sensorQuadrant(orientation)
+                if (quadrant < 0 || quadrant == queuedQuadrant) return
+                queuedQuadrant = quadrant
+                orientationTask?.let(uiHandler::removeCallbacks)
+                val task = Runnable {
+                    if (rotationMode != RotationMode.AUTO ||
+                        recordingOrientationLocked || engine.state.recording ||
+                        queuedQuadrant != quadrant) return@Runnable
+                    // Request explicit rotations so the app follows the device even if
+                    // the system auto-rotate toggle is disabled (common on Samsung).
+                    val requested = when (quadrant) {
+                        0 -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                        90 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
+                        180 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT
+                        else -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                    }
+                    if (requestedOrientation != requested) requestedOrientation = requested
+                }
+                orientationTask = task
+                uiHandler.postDelayed(task, 200L)
+            }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -64,8 +104,12 @@ class MainActivity : Activity(), CaptureEngine.Listener {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         engine = CaptureEngine(this, this)
+        rotationMode = savedInstanceState?.getInt("rotationMode")?.let {
+            RotationMode.entries.getOrNull(it)
+        } ?: RotationMode.AUTO
         buildRatioBar()
         wireControls()
+        applyRotationMode()
 
         preview.holder.addCallback(object : SurfaceHolder.Callback {
             override fun surfaceCreated(holder: SurfaceHolder) = Unit
@@ -83,6 +127,7 @@ class MainActivity : Activity(), CaptureEngine.Listener {
                     surfaceReady = true
                     engine.attachPreview(holder.surface, width, height)
                 }
+                syncPreviewAfterRotation()
             }
 
             override fun surfaceDestroyed(holder: SurfaceHolder) {
@@ -94,11 +139,29 @@ class MainActivity : Activity(), CaptureEngine.Listener {
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
-        if (::engine.isInitialized) {
-            engine.updatePreviewSize(preview.width, preview.height)
-            engine.onDisplayRotationChanged()
-            refreshOrientationButton()
+        if (::engine.isInitialized) syncPreviewAfterRotation()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putInt("rotationMode", rotationMode.ordinal)
+        super.onSaveInstanceState(outState)
+    }
+
+    private fun syncPreviewAfterRotation() {
+        // Window rotation and SurfaceHolder dimensions can update at different times;
+        // sample both again after the first layout and the device animation has settled.
+        preview.post {
+            if (surfaceReady && ::engine.isInitialized) {
+                engine.updatePreviewSize(preview.width, preview.height)
+                engine.onDisplayRotationChanged()
+            }
         }
+        preview.postDelayed({
+            if (surfaceReady && ::engine.isInitialized) {
+                engine.updatePreviewSize(preview.width, preview.height)
+                engine.onDisplayRotationChanged()
+            }
+        }, 160L)
     }
 
     private fun bindViews() {
@@ -131,6 +194,7 @@ class MainActivity : Activity(), CaptureEngine.Listener {
 
     override fun onResume() {
         super.onResume()
+        if (orientationListener.canDetectOrientation()) orientationListener.enable()
         if (hasCameraPermission()) {
             startEngine()
         } else {
@@ -142,6 +206,9 @@ class MainActivity : Activity(), CaptureEngine.Listener {
     }
 
     override fun onPause() {
+        orientationListener.disable()
+        orientationTask?.let(uiHandler::removeCallbacks)
+        queuedQuadrant = -1
         engine.stop()
         super.onPause()
     }
@@ -214,13 +281,13 @@ class MainActivity : Activity(), CaptureEngine.Listener {
         }
         switchCamera.setOnClickListener { cycleCamera() }
         orientationButton.setOnClickListener {
-            if (engine.state.recording) return@setOnClickListener
-            requestedOrientation =
-                if (resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) {
-                    ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                } else {
-                    ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-                }
+            if (engine.state.recording || recordingOrientationLocked) return@setOnClickListener
+            rotationMode = when (rotationMode) {
+                RotationMode.AUTO -> RotationMode.LANDSCAPE
+                RotationMode.LANDSCAPE -> RotationMode.PORTRAIT
+                RotationMode.PORTRAIT -> RotationMode.AUTO
+            }
+            applyRotationMode()
         }
         qualityButton.setOnClickListener {
             if (engine.state.recording) return@setOnClickListener
@@ -238,13 +305,24 @@ class MainActivity : Activity(), CaptureEngine.Listener {
         }
     }
 
+    private fun applyRotationMode() {
+        orientationTask?.let(uiHandler::removeCallbacks)
+        queuedQuadrant = -1
+        requestedOrientation = when (rotationMode) {
+            RotationMode.AUTO -> ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
+            RotationMode.LANDSCAPE -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            RotationMode.PORTRAIT -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+        }
+        refreshOrientationButton()
+        if (::engine.isInitialized) syncPreviewAfterRotation()
+    }
+
     private fun refreshOrientationButton() {
-        orientationButton.text =
-            if (resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) {
-                getString(R.string.to_portrait)
-            } else {
-                getString(R.string.to_landscape)
-            }
+        orientationButton.text = when (rotationMode) {
+            RotationMode.AUTO -> getString(R.string.rotation_auto)
+            RotationMode.LANDSCAPE -> getString(R.string.rotation_landscape)
+            RotationMode.PORTRAIT -> getString(R.string.rotation_portrait)
+        }
     }
 
     private fun cycleCamera() {
@@ -273,6 +351,15 @@ class MainActivity : Activity(), CaptureEngine.Listener {
     override fun onStateChanged(state: CaptureEngine.State) = renderState(state)
 
     private fun renderState(state: CaptureEngine.State) {
+        // A single MP4 track cannot change width/height mid-take. Freeze the display
+        // orientation until stop, then resume the user's chosen rotation mode.
+        if (state.recording && !recordingOrientationLocked) {
+            recordingOrientationLocked = true
+            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LOCKED
+        } else if (!state.recording && recordingOrientationLocked) {
+            recordingOrientationLocked = false
+            applyRotationMode()
+        }
         hudMode.text = if (state.hdr10PlusDynamic) {
             "${state.hdrMode.label} · dynamic"
         } else {
