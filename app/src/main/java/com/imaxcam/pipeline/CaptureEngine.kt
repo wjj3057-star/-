@@ -451,23 +451,23 @@ class CaptureEngine(
         }.getOrNull()
     }
 
-    private fun cameraRotation(info: CameraInfo): Int =
-        OrientationMath.cameraRotation(
-            info.sensorOrientation, displayRotationDegrees(), info.isFront
-        )
-
     private fun outputCrop(source: Size, info: CameraInfo): CropSpec {
-        // The Android window and Display.rotation do not necessarily update in the
-        // same callback. Use the actual viewport dimensions to pick output orientation.
+        // SurfaceTexture.getTransformMatrix has already turned the native camera
+        // sensor output into the device's natural portrait orientation. The original
+        // code re-applied SENSOR_ORIENTATION, rotating the preview 90 degrees twice.
         val portrait = if (previewWidth > 0 && previewHeight > 0) {
             previewHeight > previewWidth
         } else {
             context.resources.configuration.orientation !=
                 android.content.res.Configuration.ORIENTATION_LANDSCAPE
         }
-        return OrientationMath.crop(
-            source.width, source.height, state.format.ratio,
-            cameraRotation(info), portrait
+        return OrientationMath.surfaceOutputCrop(
+            srcW = source.width,
+            srcH = source.height,
+            sensorDegrees = info.sensorOrientation,
+            displayDegrees = displayRotationDegrees(),
+            aspect = state.format.ratio,
+            portrait = portrait
         )
     }
 
@@ -475,10 +475,15 @@ class CaptureEngine(
         val info = state.camera ?: return
         val source = state.sourceSize ?: return
         val crop = outputCrop(source, info)
-        val rotation = cameraRotation(info)
+        val (naturalW, naturalH) = OrientationMath.naturalSourceSize(
+            source.width, source.height, info.sensorOrientation
+        )
+        // The GPU only compensates for rotating the phone beyond its natural
+        // orientation; it MUST NOT apply the sensor mounting angle a second time.
+        val rotation = OrientationMath.textureRotation(displayRotationDegrees())
         CropMatrix.build(
-            srcW = source.width,
-            srcH = source.height,
+            srcW = naturalW,
+            srcH = naturalH,
             cropW = crop.outW,
             cropH = crop.outH,
             rotationDegrees = rotation,
