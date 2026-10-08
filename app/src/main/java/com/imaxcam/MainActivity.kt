@@ -40,6 +40,7 @@ class MainActivity : Activity(), CaptureEngine.Listener {
     private lateinit var preview: SurfaceView
     private lateinit var hudMode: TextView
     private lateinit var hudSize: TextView
+    private lateinit var hudAudio: TextView
     private lateinit var hudLatency: TextView
     private lateinit var recordTimer: TextView
     private lateinit var ratioBar: LinearLayout
@@ -50,6 +51,7 @@ class MainActivity : Activity(), CaptureEngine.Listener {
     private lateinit var lowLatency: CheckBox
     private lateinit var stabilization: CheckBox
     private lateinit var audioEnabled: CheckBox
+    private lateinit var spatialAudioAuto: CheckBox
 
     private val ratioButtons = mutableMapOf<ImaxFormat, TextView>()
     private var surfaceReady = false
@@ -103,6 +105,7 @@ class MainActivity : Activity(), CaptureEngine.Listener {
         preview = findViewById(R.id.preview)
         hudMode = findViewById(R.id.hudMode)
         hudSize = findViewById(R.id.hudSize)
+        hudAudio = findViewById(R.id.hudAudio)
         hudLatency = findViewById(R.id.hudLatency)
         recordTimer = findViewById(R.id.recordTimer)
         ratioBar = findViewById(R.id.ratioBar)
@@ -113,6 +116,7 @@ class MainActivity : Activity(), CaptureEngine.Listener {
         lowLatency = findViewById(R.id.lowLatency)
         stabilization = findViewById(R.id.stabilization)
         audioEnabled = findViewById(R.id.audioEnabled)
+        spatialAudioAuto = findViewById(R.id.spatialAudioAuto)
     }
 
     private fun goFullscreen() {
@@ -229,6 +233,9 @@ class MainActivity : Activity(), CaptureEngine.Listener {
         stabilization.setOnCheckedChangeListener { _, checked ->
             engine.setStabilization(checked)
         }
+        spatialAudioAuto.setOnCheckedChangeListener { _, checked ->
+            engine.setSpatialAudioAuto(checked)
+        }
     }
 
     private fun refreshOrientationButton() {
@@ -283,6 +290,8 @@ class MainActivity : Activity(), CaptureEngine.Listener {
             )
         }
 
+        hudAudio.text = getString(R.string.audio_actual, state.audioMode)
+
         hudLatency.text = String.format(
             Locale.US, "latency %s  ·  %.1f fps", state.latency.format(), state.renderFps
         )
@@ -300,6 +309,7 @@ class MainActivity : Activity(), CaptureEngine.Listener {
         switchCamera.isEnabled = !state.recording && engine.availableCameras.size > 1
         orientationButton.isEnabled = !state.recording
         qualityButton.isEnabled = !state.recording
+        spatialAudioAuto.isEnabled = !state.recording
         qualityButton.text = getString(R.string.quality_value, state.quality.label)
         ratioButtons.values.forEach { it.isEnabled = !state.recording }
     }
