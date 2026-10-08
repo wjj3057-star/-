@@ -92,6 +92,32 @@
             android:contentDescription="@string/record_start" />
 
         <Button
+            android:id="@+id/orientationButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:background="@drawable/bg_chip"
+            android:paddingLeft="14dp"
+            android:paddingRight="14dp"
+            android:text="@string/to_portrait"
+            android:textAllCaps="false"
+            android:textColor="@color/text_primary"
+            android:textSize="11sp" />
+
+        <Button
+            android:id="@+id/qualityButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:background="@drawable/bg_chip"
+            android:paddingLeft="14dp"
+            android:paddingRight="14dp"
+            android:text="@string/quality_default"
+            android:textAllCaps="false"
+            android:textColor="@color/text_primary"
+            android:textSize="11sp" />
+
+        <Button
             android:id="@+id/switchCamera"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
