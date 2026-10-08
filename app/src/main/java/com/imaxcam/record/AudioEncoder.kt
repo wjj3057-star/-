@@ -241,6 +241,9 @@ class AudioEncoder(
         if (worker?.isAlive == true) Log.w(TAG, "Audio worker did not finish in time")
         worker = null
         runCatching { codec?.stop() }
+        // A zero-length take may never emit an AAC output format. Avoid holding
+        // video samples hostage waiting for a track that will never appear.
+        muxer.dropAudioTrack()
     }
 
     fun release() {
