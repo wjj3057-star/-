@@ -109,12 +109,27 @@ class MainActivity : Activity(), CaptureEngine.Listener {
         goFullscreen()
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
-        engine = CaptureEngine(this, this)
+        // Android recreates this Activity on 90-degree turns to select layout-land.
+        // Restore capture preferences before starting the Camera2/GL engine.
+        val savedFormat = savedInstanceState?.getInt("formatIndex")?.let {
+            ImaxFormat.entries.getOrNull(it)
+        } ?: ImaxFormat.DEFAULT
+        val savedQuality = savedInstanceState?.getInt("qualityIndex")?.let {
+            VideoQuality.entries.getOrNull(it)
+        } ?: VideoQuality.DEFAULT
+        engine = CaptureEngine(this, this, savedFormat, savedQuality)
         rotationMode = savedInstanceState?.getInt("rotationMode")?.let {
             RotationMode.entries.getOrNull(it)
         } ?: RotationMode.AUTO
         buildRatioBar()
+        lowLatency.isChecked = savedInstanceState?.getBoolean("lowLatency", true) ?: true
+        stabilization.isChecked = savedInstanceState?.getBoolean("stabilization", false) ?: false
+        spatialAudioAuto.isChecked = savedInstanceState?.getBoolean("spatialAudioAuto", true) ?: true
+        audioEnabled.isChecked = savedInstanceState?.getBoolean("audioEnabled", true) ?: true
         wireControls()
+        engine.setLowLatency(lowLatency.isChecked)
+        engine.setStabilization(stabilization.isChecked)
+        engine.setSpatialAudioAuto(spatialAudioAuto.isChecked)
         applyRotationMode()
 
         preview.holder.addCallback(object : SurfaceHolder.Callback {
@@ -150,6 +165,12 @@ class MainActivity : Activity(), CaptureEngine.Listener {
 
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putInt("rotationMode", rotationMode.ordinal)
+        outState.putInt("formatIndex", engine.state.format.ordinal)
+        outState.putInt("qualityIndex", engine.state.quality.ordinal)
+        outState.putBoolean("lowLatency", lowLatency.isChecked)
+        outState.putBoolean("stabilization", stabilization.isChecked)
+        outState.putBoolean("spatialAudioAuto", spatialAudioAuto.isChecked)
+        outState.putBoolean("audioEnabled", audioEnabled.isChecked)
         super.onSaveInstanceState(outState)
     }
 
@@ -277,7 +298,7 @@ class MainActivity : Activity(), CaptureEngine.Listener {
             ratioBar.addView(chip, params)
             ratioButtons[format] = chip
         }
-        selectFormat(ImaxFormat.DEFAULT, notify = false)
+        selectFormat(engine.state.format, notify = false)
     }
 
     private fun selectFormat(format: ImaxFormat, notify: Boolean = true) {

@@ -57,7 +57,9 @@ import java.util.concurrent.atomic.AtomicInteger
  */
 class CaptureEngine(
     private val context: Context,
-    private val listener: Listener
+    private val listener: Listener,
+    private val initialFormat: ImaxFormat = ImaxFormat.DEFAULT,
+    private val initialQuality: VideoQuality = VideoQuality.DEFAULT
 ) {
 
     interface Listener {
@@ -142,7 +144,7 @@ class CaptureEngine(
     private val frameRate = FrameRateMeter()
 
     @Volatile
-    var state = State()
+    var state = State(format = initialFormat, quality = initialQuality)
         private set
 
     var availableCameras: List<CameraInfo> = emptyList()

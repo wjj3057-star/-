@@ -25,7 +25,7 @@
             android:name=".MainActivity"
             android:exported="true"
             android:screenOrientation="fullSensor"
-            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|smallestScreenSize|density"
+            android:configChanges="screenLayout|keyboardHidden|smallestScreenSize|density"
             android:resizeableActivity="false"
             android:theme="@style/Theme.ImaxCam.Fullscreen">
             <intent-filter>
