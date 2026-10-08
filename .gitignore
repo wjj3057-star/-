@@ -1,0 +1,11 @@
+.gradle/
+.idea/
+local.properties
+**/build/
+out/
+node_modules/
+*.jks
+*.keystore
+*.apk
+*.idsig
+__pycache__/
