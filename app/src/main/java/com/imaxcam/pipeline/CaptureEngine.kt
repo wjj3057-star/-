@@ -23,6 +23,7 @@ import com.imaxcam.core.CropSpec
 import com.imaxcam.core.FrameRateMeter
 import com.imaxcam.core.ImaxFormat
 import com.imaxcam.core.LatencyMonitor
+import com.imaxcam.core.VideoQuality
 import com.imaxcam.gl.CropRenderer
 import com.imaxcam.gl.EglCore
 import com.imaxcam.gl.FrameAnalyzer
@@ -71,6 +72,7 @@ class CaptureEngine(
         val hdrMode: HdrMode = HdrMode.SDR,
         val hdr10PlusDynamic: Boolean = false,
         val format: ImaxFormat = ImaxFormat.DEFAULT,
+        val quality: VideoQuality = VideoQuality.DEFAULT,
         val sourceSize: Size? = null,
         val crop: CropSpec? = null,
         val fps: Int = 30,
@@ -119,6 +121,7 @@ class CaptureEngine(
     private var muxer: MuxerGate? = null
     private var outputFile: OutputFile? = null
     private var recordStartNanos = 0L
+    private var recordingDone: CountDownLatch? = null
 
     @Volatile
     private var recording = false
@@ -176,9 +179,14 @@ class CaptureEngine(
         // on rather than merely posted.
         if (recording) {
             recording = false
-            runOnHandler(renderHandler, DRAIN_TIMEOUT_MS) { finishRecording() }
-            runOnHandler(codecHandler, DRAIN_TIMEOUT_MS) { }
-            runOnHandler(renderHandler, DRAIN_TIMEOUT_MS) { }
+            runOnHandler(renderHandler, SHUTDOWN_TIMEOUT_MS) { finishRecording() }
+        }
+        // Encoder callbacks run on codecHandler. Never wait for its EOS callback on
+        // codecHandler itself; doing so deadlocks the drain and corrupts the MP4.
+        recordingDone?.let {
+            if (!it.await(DRAIN_TIMEOUT_MS + SHUTDOWN_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+                Log.e(TAG, "Timed out finalizing MP4 on pause")
+            }
         }
         runOnHandler(cameraHandler, SHUTDOWN_TIMEOUT_MS) { controller?.close() }
         runOnHandler(renderHandler, SHUTDOWN_TIMEOUT_MS) { teardownGl() }
@@ -253,15 +261,30 @@ class CaptureEngine(
     // ---------------------------------------------------------------------------------
 
     fun setFormat(format: ImaxFormat) {
-        if (state.format == format) return
+        if (recording || state.format == format) return
         postRender {
             publish(state.copy(format = format))
             recomputeCrop()
         }
     }
 
+    fun setQuality(quality: VideoQuality) {
+        if (recording || state.quality == quality) return
+        postRender {
+            publish(state.copy(quality = quality))
+            restartCamera()
+        }
+    }
+
+    /** Screen rotation changes the crop axes without rebuilding the Camera2 session. */
+    fun onDisplayRotationChanged() {
+        if (!recording) postRender {
+            if (surfaceTexture != null) recomputeCrop()
+        }
+    }
+
     fun setHdrMode(mode: HdrMode) {
-        if (state.hdrMode == mode) return
+        if (recording || state.hdrMode == mode) return
         // The dynamic range profile is baked into the capture session, so it has to be
         // rebuilt. Preview is restarted with the new profile from scratch.
         postRender {
@@ -271,7 +294,7 @@ class CaptureEngine(
     }
 
     fun setFps(fps: Int) {
-        if (state.fps == fps) return
+        if (recording || state.fps == fps) return
         postRender {
             publish(state.copy(fps = fps))
             restartCamera()
@@ -279,7 +302,7 @@ class CaptureEngine(
     }
 
     fun setCamera(info: CameraInfo) {
-        if (state.camera?.id == info.id) return
+        if (recording || state.camera?.id == info.id) return
         postRender {
             val mode = if (info.supportedHdrModes.contains(state.hdrMode)) {
                 state.hdrMode
@@ -349,9 +372,9 @@ class CaptureEngine(
         renderer = CropRenderer().also { it.setUp() }
         textureId = GlUtil.createExternalTexture()
 
-        val source = CropCalc.pickSource(info.recordSizes, state.format)
-            ?: Size(CropCalc.UHD_WIDTH, CropCalc.UHD_HEIGHT)
-        val crop = CropCalc.fit(source, state.format)
+        val source = CropCalc.pickSourceForQuality(info.recordSizes, state.quality)
+            ?: error("Camera has no supported capture sizes")
+        val crop = outputCrop(source)
 
         val texture = SurfaceTexture(textureId).apply {
             setDefaultBufferSize(source.width, source.height)
@@ -409,10 +432,23 @@ class CaptureEngine(
         }.getOrNull()
     }
 
+    /**
+     * The sensor stream stays landscape. In portrait we rotate the crop into a real
+     * portrait encoder surface (height > width), not just a portrait UI preview.
+     */
+    private fun outputCrop(source: Size): CropSpec {
+        val landscape = CropCalc.fit(source, state.format)
+        return if (displayRotationDegrees() % 180 == 0) {
+            landscape.copy(outW = landscape.outH, outH = landscape.outW)
+        } else {
+            landscape
+        }
+    }
+
     private fun recomputeCrop() {
         val info = state.camera ?: return
         val source = state.sourceSize ?: return
-        val crop = CropCalc.fit(source, state.format)
+        val crop = outputCrop(source)
         val rotation = ((info.sensorOrientation - displayRotationDegrees() + 360) % 360)
         CropMatrix.build(
             srcW = source.width,
@@ -519,7 +555,10 @@ class CaptureEngine(
             }
             GLES20.glViewport(0, 0, crop.outW, crop.outH)
             draw.drawPassthrough(textureId, stMatrix, cropMatrix)
-            core.setPresentationTime(encoderSurface, captureNanos)
+            // SurfaceTexture timestamps may be BOOTTIME while AudioRecord uses
+            // MONOTONIC. eglPresentationTime must share System.nanoTime's time base
+            // with the AAC encoder, or a 2-second video can appear hours long.
+            core.setPresentationTime(encoderSurface, System.nanoTime())
             core.swapBuffers(encoderSurface)
         }
 
@@ -604,14 +643,18 @@ class CaptureEngine(
         val core = egl ?: error("GL not ready")
         val crop = state.crop ?: error("No crop configured")
 
+        val originNanos = System.nanoTime()
         val file = OutputFile.create(
             context, state.format.label, crop.outW, crop.outH, state.hdrMode.label
         )
         outputFile = file
 
-        // The crop matrix already rotates the frame into display orientation, so the
-        // container needs no further hint.
-        val gate = MuxerGate(file.fileDescriptor, orientationHint = 0, expectAudio = withAudio)
+        // Frames are physically rotated on the GPU; no MP4 orientation hint is needed.
+        // Video and audio are stamped in one MONOTONIC time domain from originNanos.
+        val gate = MuxerGate(
+            file.fileDescriptor, orientationHint = 0, expectAudio = withAudio,
+            originUs = originNanos / 1000L
+        )
         muxer = gate
 
         val bitrate = CropCalc.suggestedBitrate(crop.outW, crop.outH, state.fps)
@@ -650,7 +693,8 @@ class CaptureEngine(
 
         pendingMetadata = Hdr10PlusBuilder.neutral(TARGET_DISPLAY_NITS)
         metadataFrameCounter = 0
-        recordStartNanos = System.nanoTime()
+        recordStartNanos = originNanos
+        recordingDone = CountDownLatch(1)
         recording = true
         publish(
             state.copy(
@@ -685,42 +729,61 @@ class CaptureEngine(
         val gate = muxer
         val file = outputFile
         val audio = audioEncoder
+        val done = recordingDone
         val durationMs = if (recordStartNanos > 0) {
             (System.nanoTime() - recordStartNanos) / 1_000_000L
-        } else {
-            0L
-        }
+        } else 0L
 
         val surface = encoderEglSurface
         encoderEglSurface = null
         encoder.signalEndOfStream()
 
-        codecHandler?.post {
-            audio?.stop()
-            encoder.awaitDrain(DRAIN_TIMEOUT_MS)
-            postRender {
-                // Make sure the encoder surface is not the current draw target before it
-                // is destroyed.
-                previewEglSurface?.let { egl?.makeCurrent(it) }
-                egl?.releaseSurface(surface)
-                audio?.release()
-                encoder.release()
-                audioEncoder = null
-                videoEncoder = null
-                val bytes = gate?.bytesWritten ?: 0L
-                gate?.release()
-                muxer = null
-                if (bytes > 0) file?.publish() else file?.discard()
-                outputFile = null
-                recordStartNanos = 0
-                publish(state.copy(recording = false, recordedMs = 0))
-                if (file != null) {
-                    mainHandler.post {
-                        listener.onRecordingStopped(file.displayName, durationMs, bytes)
+        // The MediaCodec callback runs on codecHandler. Await EOS on a SEPARATE thread
+        // so callbacks remain free to drain the final encoded frames and write the MP4.
+        Thread({
+            runCatching { audio?.stop() }
+                .onFailure { Log.w(TAG, "Audio stop failed", it) }
+            val drained = encoder.awaitDrain(DRAIN_TIMEOUT_MS)
+            if (!drained) Log.e(TAG, "Video codec did not deliver EOS")
+
+            val finalizer = Runnable {
+                try {
+                    previewEglSurface?.let { egl?.makeCurrent(it) }
+                    egl?.releaseSurface(surface)
+                    runCatching { audio?.release() }
+                    runCatching { encoder.release() }
+                    audioEncoder = null
+                    videoEncoder = null
+                    val bytes = gate?.bytesWritten ?: 0L
+                    // muxer.stop() must complete successfully before IS_PENDING is
+                    // cleared, otherwise Gallery sees a malformed MP4.
+                    val valid = gate?.release() == true && drained
+                    muxer = null
+                    if (valid && bytes > 0L) file?.publish() else file?.discard()
+                    outputFile = null
+                    recordStartNanos = 0L
+                    publish(state.copy(
+                        recording = false, recordedMs = 0L, hdr10PlusDynamic = false
+                    ))
+                    if (file != null && valid && bytes > 0L) {
+                        mainHandler.post {
+                            listener.onRecordingStopped(file.displayName, durationMs, bytes)
+                        }
+                    } else {
+                        fail("Recording could not be finalized; incomplete file discarded", null)
                     }
+                } finally {
+                    recordingDone = null
+                    done?.countDown()
                 }
             }
-        }
+            if (renderHandler?.post(finalizer) != true) {
+                Log.e(TAG, "Render thread stopped before recording finalized")
+                runCatching { gate?.release() }
+                file?.discard()
+                done?.countDown()
+            }
+        }, "imax-finalize").start()
     }
 
     /** Tears down a half-built recording, leaving no stray file behind. */
@@ -736,6 +799,8 @@ class CaptureEngine(
         outputFile?.discard()
         outputFile = null
         recordStartNanos = 0
+        recordingDone?.countDown()
+        recordingDone = null
         publish(state.copy(recording = false, recordedMs = 0))
     }
 
@@ -762,7 +827,7 @@ class CaptureEngine(
         const val SDR_PEAK_NITS = 203f // ITU-R BT.2408 reference diffuse white
         const val METADATA_INTERVAL_FRAMES = 4
         const val TELEMETRY_INTERVAL_NANOS = 250_000_000L
-        const val DRAIN_TIMEOUT_MS = 1_500L
+        const val DRAIN_TIMEOUT_MS = 10_000L
         const val SHUTDOWN_TIMEOUT_MS = 2_000L
     }
 }
