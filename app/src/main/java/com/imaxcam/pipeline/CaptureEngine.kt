@@ -80,6 +80,8 @@ class CaptureEngine(
         val recording: Boolean = false,
         val lowLatency: Boolean = true,
         val stabilization: Boolean = false,
+        val spatialAudioAuto: Boolean = true,
+        val audioMode: String = "자동 녹음 대기",
         val previewIsHdr: Boolean = false,
         val latency: LatencyMonitor.Snapshot = LatencyMonitor.Snapshot(0.0, 0.0, 0.0, 0),
         val renderFps: Double = 0.0,
@@ -312,6 +314,12 @@ class CaptureEngine(
             publish(state.copy(camera = info, hdrMode = mode))
             restartCamera()
         }
+    }
+
+    /** Automatic microphone multichannel negotiation, on by default. */
+    fun setSpatialAudioAuto(enabled: Boolean) {
+        if (recording) return
+        publish(state.copy(spatialAudioAuto = enabled))
     }
 
     fun setLowLatency(enabled: Boolean) {
@@ -676,17 +684,22 @@ class CaptureEngine(
         encoderEglSurface = core.createWindowSurface(encoder.inputSurface)
         encoder.start()
 
+        var actualAudioMode = if (withAudio) "마이크 사용 불가" else "음소거"
         if (withAudio) {
             val audio = AudioEncoder(
-                AudioEncoder.Config(lowLatency = state.lowLatency),
+                context,
+                AudioEncoder.Config(
+                    lowLatency = state.lowLatency,
+                    spatialAuto = state.spatialAudioAuto
+                ),
                 gate
             ) { message, cause -> Log.w(TAG, message, cause) }
-            if (audio.prepare()) {
+            if (audio.prepare() && audio.start()) {
                 audioEncoder = audio
-                audio.start()
+                actualAudioMode = audio.description
             } else {
-                // No usable microphone: release the gate's expectation so the video track
-                // starts on its own rather than stalling behind audio that never comes.
+                // Audio setup must never cause the video track to wait indefinitely.
+                audio.release()
                 gate.dropAudioTrack()
             }
         }
@@ -700,6 +713,7 @@ class CaptureEngine(
             state.copy(
                 recording = true,
                 bitrate = bitrate,
+                audioMode = actualAudioMode,
                 hdr10PlusDynamic = encoder.hdr10PlusActive
             )
         )
