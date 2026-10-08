@@ -3,6 +3,8 @@ package com.imaxcam
 import android.Manifest
 import android.app.Activity
 import android.content.pm.PackageManager
+import android.content.pm.ActivityInfo
+import android.content.res.Configuration
 import android.os.Bundle
 import android.util.TypedValue
 import android.view.SurfaceHolder
@@ -18,6 +20,7 @@ import android.widget.TextView
 import android.widget.Toast
 import com.imaxcam.camera.HdrMode
 import com.imaxcam.core.ImaxFormat
+import com.imaxcam.core.VideoQuality
 import com.imaxcam.pipeline.CaptureEngine
 import java.util.Locale
 
@@ -42,6 +45,8 @@ class MainActivity : Activity(), CaptureEngine.Listener {
     private lateinit var ratioBar: LinearLayout
     private lateinit var recordButton: Button
     private lateinit var switchCamera: Button
+    private lateinit var orientationButton: Button
+    private lateinit var qualityButton: Button
     private lateinit var lowLatency: CheckBox
     private lateinit var stabilization: CheckBox
     private lateinit var audioEnabled: CheckBox
@@ -69,8 +74,13 @@ class MainActivity : Activity(), CaptureEngine.Listener {
                 width: Int,
                 height: Int
             ) {
-                surfaceReady = true
-                engine.attachPreview(holder.surface, width, height)
+                if (surfaceReady) {
+                    engine.updatePreviewSize(width, height)
+                    engine.onDisplayRotationChanged()
+                } else {
+                    surfaceReady = true
+                    engine.attachPreview(holder.surface, width, height)
+                }
             }
 
             override fun surfaceDestroyed(holder: SurfaceHolder) {
@@ -78,6 +88,15 @@ class MainActivity : Activity(), CaptureEngine.Listener {
                 engine.detachPreview()
             }
         })
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (::engine.isInitialized) {
+            engine.updatePreviewSize(preview.width, preview.height)
+            engine.onDisplayRotationChanged()
+            refreshOrientationButton()
+        }
     }
 
     private fun bindViews() {
@@ -89,6 +108,8 @@ class MainActivity : Activity(), CaptureEngine.Listener {
         ratioBar = findViewById(R.id.ratioBar)
         recordButton = findViewById(R.id.recordButton)
         switchCamera = findViewById(R.id.switchCamera)
+        orientationButton = findViewById(R.id.orientationButton)
+        qualityButton = findViewById(R.id.qualityButton)
         lowLatency = findViewById(R.id.lowLatency)
         stabilization = findViewById(R.id.stabilization)
         audioEnabled = findViewById(R.id.audioEnabled)
@@ -188,10 +209,35 @@ class MainActivity : Activity(), CaptureEngine.Listener {
             }
         }
         switchCamera.setOnClickListener { cycleCamera() }
+        orientationButton.setOnClickListener {
+            if (engine.state.recording) return@setOnClickListener
+            requestedOrientation =
+                if (resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) {
+                    ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                } else {
+                    ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                }
+        }
+        qualityButton.setOnClickListener {
+            if (engine.state.recording) return@setOnClickListener
+            val options = VideoQuality.entries
+            val index = options.indexOf(engine.state.quality)
+            engine.setQuality(options[(index + 1) % options.size])
+        }
+        refreshOrientationButton()
         lowLatency.setOnCheckedChangeListener { _, checked -> engine.setLowLatency(checked) }
         stabilization.setOnCheckedChangeListener { _, checked ->
             engine.setStabilization(checked)
         }
+    }
+
+    private fun refreshOrientationButton() {
+        orientationButton.text =
+            if (resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) {
+                getString(R.string.to_portrait)
+            } else {
+                getString(R.string.to_landscape)
+            }
     }
 
     private fun cycleCamera() {
@@ -232,8 +278,8 @@ class MainActivity : Activity(), CaptureEngine.Listener {
         } else {
             String.format(
                 Locale.US,
-                "%dx%d  %.3f:1  %d fps  %d Mbps",
-                crop.outW, crop.outH, crop.achievedRatio, state.fps, state.bitrate / 1_000_000
+                "%dx%d  %s  %d fps  %d Mbps",
+                crop.outW, crop.outH, state.format.label, state.fps, state.bitrate / 1_000_000
             )
         }
 
@@ -252,6 +298,9 @@ class MainActivity : Activity(), CaptureEngine.Listener {
                 String.format(Locale.US, "● %02d:%02d", seconds / 60, seconds % 60)
         }
         switchCamera.isEnabled = !state.recording && engine.availableCameras.size > 1
+        orientationButton.isEnabled = !state.recording
+        qualityButton.isEnabled = !state.recording
+        qualityButton.text = getString(R.string.quality_value, state.quality.label)
         ratioButtons.values.forEach { it.isEnabled = !state.recording }
     }
 
