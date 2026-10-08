@@ -133,20 +133,35 @@ object CropCalc {
      * fabricates a size by scaling a larger stream and never requests an unavailable
      * SurfaceTexture resolution. The exact negotiated size is shown on the HUD.
      */
-    fun pickSourceForQuality(candidates: List<Size>, quality: VideoQuality): Size? {
+    fun pickSourceForQuality(candidates: List<Size>, quality: VideoQuality): Size? =
+        pickNativeResolution(candidates, quality, { it.width }, { it.height })
+
+    /**
+     * Size-independent selector so the actual camera decision can be unit-tested on
+     * the JVM without constructing an Android framework Size stub.
+     */
+    fun <T> pickNativeResolution(
+        candidates: List<T>,
+        quality: VideoQuality,
+        width: (T) -> Int,
+        height: (T) -> Int
+    ): T? {
         if (candidates.isEmpty()) return null
         val widescreen = candidates.filter {
-            val longEdge = maxOf(it.width, it.height).toDouble()
-            val shortEdge = minOf(it.width, it.height).toDouble()
+            val longEdge = maxOf(width(it), height(it)).toDouble()
+            val shortEdge = minOf(width(it), height(it)).toDouble()
             shortEdge > 0 && abs(longEdge / shortEdge - 16.0 / 9.0) < 0.08
         }
         val pool = widescreen.ifEmpty { candidates }
-        return pool.minWithOrNull(compareBy<Size> {
-            val longEdge = maxOf(it.width, it.height)
-            val shortEdge = minOf(it.width, it.height)
+        return pool.minWithOrNull(compareBy<T> {
+            val longEdge = maxOf(width(it), height(it))
+            val shortEdge = minOf(width(it), height(it))
             abs(longEdge - quality.width).toLong() * 2 +
                 abs(shortEdge - quality.height).toLong()
-        }.thenBy { abs(it.width.toLong() * it.height - quality.width.toLong() * quality.height) })
+        }.thenBy {
+            abs(width(it).toLong() * height(it) -
+                quality.width.toLong() * quality.height)
+        })
     }
 
     /**
