@@ -2,6 +2,8 @@ package com.imaxcam
 
 import com.imaxcam.core.CropCalc
 import com.imaxcam.core.ImaxFormat
+import com.imaxcam.core.VideoQuality
+import android.util.Size
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -47,6 +49,20 @@ class CropCalcTest {
                 abs(crop.achievedRatio - format.ratio) / format.ratio < 0.01
             )
         }
+    }
+
+    @Test
+    fun `quality selector chooses supported camera sizes without scaling`() {
+        val sizes = listOf(Size(3840, 2160), Size(1920, 1080), Size(1280, 720))
+        assertEquals(Size(1280, 720), CropCalc.pickSourceForQuality(sizes, VideoQuality.HD))
+        assertEquals(Size(1920, 1080), CropCalc.pickSourceForQuality(sizes, VideoQuality.FULL_HD))
+        assertEquals(Size(3840, 2160), CropCalc.pickSourceForQuality(sizes, VideoQuality.UHD))
+    }
+
+    @Test
+    fun `quality selector falls back to nearest advertised resolution`() {
+        val sizes = listOf(Size(1920, 1080), Size(1280, 720))
+        assertEquals(Size(1920, 1080), CropCalc.pickSourceForQuality(sizes, VideoQuality.UHD))
     }
 
     @Test
