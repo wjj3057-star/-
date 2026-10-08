@@ -1,25 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">IMAX Cam</string>
-
-    <string name="record_start">촬영 시작</string>
-    <string name="record_stop">촬영 중지</string>
-    <string name="switch_camera">카메라 전환</string>
-    <string name="to_portrait">세로 촬영</string>
-    <string name="rotation_auto">방향: 자동</string>
-    <string name="rotation_landscape">방향: 가로 고정</string>
-    <string name="rotation_portrait">방향: 세로 고정</string>
-    <string name="to_landscape">가로 촬영</string>
-    <string name="quality_default">화질: 1080p</string>
-    <string name="quality_value">화질: %1$s</string>
-    <string name="low_latency">저지연</string>
-    <string name="stabilization">손떨림 보정</string>
-    <string name="audio">오디오</string>
-    <string name="spatial_audio_auto">다채널 자동</string>
-    <string name="audio_actual">음향: %1$s</string>
-
-    <string name="permission_denied">권한이 거부되어 촬영할 수 없습니다.</string>
-    <string name="no_hdr10_plus">이 기기는 HDR10+ 촬영을 지원하지 않습니다 (%1$s 사용)</string>
-    <string name="saved">저장됨: %1$s (%2$s, %3$s)</string>
-
+<string name="app_name">IMAX Cam</string>
+<string name="record_start">촬영 시작</string><string name="record_stop">촬영 중지</string>
+<string name="switch_camera">전후면 카메라 전환</string>
+<string name="to_portrait">세로 촬영</string><string name="to_landscape">가로 촬영</string>
+<string name="rotation_auto">방향 · 자동</string><string name="rotation_landscape">방향 · 가로</string>
+<string name="rotation_portrait">방향 · 세로</string>
+<string name="quality_default">FHD · 1080p</string><string name="quality_value">화질 · %1$s</string>
+<string name="low_latency">저지연 모드</string><string name="stabilization">손떨림 보정</string>
+<string name="audio">마이크 녹음</string><string name="spatial_audio_auto">다채널 자동 선택</string>
+<string name="audio_actual">AUDIO  %1$s</string>
+<string name="settings_title">CAPTURE SETTINGS</string>
+<string name="settings_open">촬영 설정 열기</string>
+<string name="brand_title">IMAX CAM</string><string name="brand_subtitle">CINEMA  /  CAMERA</string>
+<string name="ratio_title">FRAME  /  ASPECT RATIO</string>
+<string name="capture_label">C A P T U R E</string>
+<string name="capture_ready">TAP TO RECORD</string><string name="capture_recording">●  RECORDING</string>
+<string name="permission_denied">권한이 거부되어 촬영할 수 없습니다.</string>
+<string name="no_hdr10_plus">이 기기는 HDR10+ 촬영을 지원하지 않습니다 (%1$s 사용)</string>
+<string name="saved">저장됨: %1$s (%2$s, %3$s)</string>
 </resources>

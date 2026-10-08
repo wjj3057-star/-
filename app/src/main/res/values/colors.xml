@@ -1,11 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="black">#FF000000</color>
-    <color name="scrim">#99000000</color>
-    <color name="accent">#FFD54F</color>
-    <color name="record">#FFE53935</color>
-    <color name="text_primary">#FFFFFFFF</color>
-    <color name="text_secondary">#B3FFFFFF</color>
-    <color name="chip_selected">#FFD54F</color>
-    <color name="ic_launcher_background">#FF101014</color>
+<color name="black">#FF060A10</color><color name="scrim">#D40A121B</color>
+<color name="accent">#FF8FEBD8</color><color name="record">#FFFF5868</color>
+<color name="text_primary">#FFF3F8FB</color><color name="text_secondary">#FFAFBEC9</color>
+<color name="chip_selected">#FF8FEBD8</color><color name="ic_launcher_background">#FF0A121B</color>
 </resources>
