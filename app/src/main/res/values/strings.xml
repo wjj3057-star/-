@@ -12,6 +12,8 @@
     <string name="low_latency">저지연</string>
     <string name="stabilization">손떨림 보정</string>
     <string name="audio">오디오</string>
+    <string name="spatial_audio_auto">다채널 자동</string>
+    <string name="audio_actual">음향: %1$s</string>
 
     <string name="permission_denied">권한이 거부되어 촬영할 수 없습니다.</string>
     <string name="no_hdr10_plus">이 기기는 HDR10+ 촬영을 지원하지 않습니다 (%1$s 사용)</string>
