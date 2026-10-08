@@ -6,6 +6,9 @@
     <string name="record_stop">촬영 중지</string>
     <string name="switch_camera">카메라 전환</string>
     <string name="to_portrait">세로 촬영</string>
+    <string name="rotation_auto">방향: 자동</string>
+    <string name="rotation_landscape">방향: 가로 고정</string>
+    <string name="rotation_portrait">방향: 세로 고정</string>
     <string name="to_landscape">가로 촬영</string>
     <string name="quality_default">화질: 1080p</string>
     <string name="quality_value">화질: %1$s</string>
