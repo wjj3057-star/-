@@ -17,11 +17,34 @@ object OrientationMath {
         return if (deviation <= tolerance) snapped else -1
     }
 
-    /** Rotation to apply to the raw sensor frame for the physical display rotation. */
-    fun cameraRotation(sensorDegrees: Int, displayDegrees: Int, front: Boolean): Int {
-        val result = if (front) sensorDegrees + displayDegrees
-                     else sensorDegrees - displayDegrees
-        return (result % 360 + 360) % 360
+    /**
+     * Camera2 SurfaceTexture's transform puts the sensor frame into the device's
+     * natural orientation. Applying SENSOR_ORIENTATION again turns the image sideways.
+     * Our texture-space matrix therefore corrects only the display's extra rotation.
+     */
+    fun textureRotation(displayDegrees: Int): Int =
+        (360 - (displayDegrees % 360 + 360) % 360) % 360
+
+    fun naturalSourceSize(width: Int, height: Int, sensorDegrees: Int): Pair<Int, Int> {
+        val swap = (sensorDegrees % 180 + 180) % 180 != 0
+        return if (swap) height to width else width to height
+    }
+
+    fun surfaceOutputCrop(
+        srcW: Int,
+        srcH: Int,
+        sensorDegrees: Int,
+        displayDegrees: Int,
+        aspect: Double,
+        portrait: Boolean
+    ): CropSpec {
+        val (naturalW, naturalH) = naturalSourceSize(srcW, srcH, sensorDegrees)
+        val quarterTurn = textureRotation(displayDegrees) % 180 != 0
+        val displayW = if (quarterTurn) naturalH else naturalW
+        val displayH = if (quarterTurn) naturalW else naturalH
+        val target = if (portrait) 1.0 / aspect else aspect
+        val fit = CropCalc.fit(displayW, displayH, target)
+        return CropSpec(srcW, srcH, fit.outW, fit.outH)
     }
 
     /** Output is a real portrait file when the window is tall, a landscape file otherwise. */
