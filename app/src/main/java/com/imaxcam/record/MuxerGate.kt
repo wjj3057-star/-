@@ -8,105 +8,161 @@ import java.io.FileDescriptor
 import java.nio.ByteBuffer
 
 /**
- * Serialises the video and audio encoders onto one [MediaMuxer].
+ * One MP4 muxer shared by both encoders.
  *
- * A muxer cannot accept samples until every track is added, so each encoder parks its
- * first samples here until both formats have arrived. Without the park, the audio
- * encoder — which produces output long before the video encoder finishes its first
- * keyframe — would either drop its opening frames or crash the muxer.
+ * Camera and microphone timestamps MUST use the same System.nanoTime() time base;
+ * [originUs] is captured at the beginning of the take. In particular, never mix a
+ * SurfaceTexture sensor timestamp (which can use BOOTTIME on some devices) with the
+ * microphone's MONOTONIC clock: their offset can look like hours of recorded video.
+ *
+ * The muxer must also preserve samples received before both output formats arrive.
+ * Dropping those samples can drop the first video IDR and produce an unplayable file.
  */
 class MuxerGate(
     descriptor: FileDescriptor,
     orientationHint: Int,
-    private var expectAudio: Boolean
+    private var expectAudio: Boolean,
+    private val originUs: Long
 ) {
-
     private val muxer = MediaMuxer(descriptor, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4).apply {
         setOrientationHint(orientationHint)
     }
-
     private val lock = Any()
+    private data class QueuedSample(
+        val video: Boolean,
+        val data: ByteArray,
+        val ptsUs: Long,
+        val flags: Int
+    )
+    private val pending = ArrayDeque<QueuedSample>()
     private var videoTrack = -1
     private var audioTrack = -1
     private var started = false
     private var stopped = false
-    private var firstPtsUs = -1L
+    private var failed = false
+    private var videoSamples = 0
+    private var videoSyncSamples = 0
+    private var videoLastPts = -1L
+    private var audioLastPts = -1L
 
-    /** Presentation time of the first sample written, for duration reporting. */
-    @Volatile
-    var lastPtsUs = 0L
+    @Volatile var lastPtsUs = 0L
         private set
-
-    @Volatile
-    var bytesWritten = 0L
+    @Volatile var bytesWritten = 0L
         private set
 
     fun addVideoTrack(format: MediaFormat) = synchronized(lock) {
-        if (videoTrack < 0) videoTrack = muxer.addTrack(format)
+        if (!stopped && videoTrack < 0) videoTrack = muxer.addTrack(format)
         maybeStart()
     }
 
     fun addAudioTrack(format: MediaFormat) = synchronized(lock) {
-        if (audioTrack < 0) audioTrack = muxer.addTrack(format)
+        if (!stopped && audioTrack < 0) audioTrack = muxer.addTrack(format)
         maybeStart()
     }
 
-    /**
-     * Declares that no audio will arrive after all, so the video track can start on its
-     * own instead of waiting for a microphone that is not there.
-     */
     fun dropAudioTrack() = synchronized(lock) {
         expectAudio = false
         maybeStart()
     }
 
     private fun maybeStart() {
-        if (started) return
-        if (videoTrack < 0) return
-        if (expectAudio && audioTrack < 0) return
-        muxer.start()
-        started = true
+        if (started || stopped || videoTrack < 0 || (expectAudio && audioTrack < 0)) return
+        try {
+            muxer.start()
+            started = true
+            while (pending.isNotEmpty()) {
+                val sample = pending.removeFirst()
+                writeNow(sample.video, ByteBuffer.wrap(sample.data),
+                    sample.data.size, sample.ptsUs, sample.flags)
+            }
+        } catch (e: Exception) {
+            failed = true
+            Log.e(TAG, "Could not start/write MP4", e)
+        }
     }
 
     fun writeVideo(buffer: ByteBuffer, info: MediaCodec.BufferInfo) =
-        write(videoTrack, buffer, info)
+        write(true, buffer, info)
 
     fun writeAudio(buffer: ByteBuffer, info: MediaCodec.BufferInfo) =
-        write(audioTrack, buffer, info)
+        write(false, buffer, info)
 
-    private fun write(track: Int, buffer: ByteBuffer, info: MediaCodec.BufferInfo) {
+    private fun write(video: Boolean, buffer: ByteBuffer, info: MediaCodec.BufferInfo) {
         synchronized(lock) {
-            if (!started || stopped || track < 0) return
-            if (info.size <= 0) return
-            if (info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0) return
-
-            // Rebase onto the first sample so the clip always starts at zero, whichever
-            // encoder happened to deliver first.
-            if (firstPtsUs < 0) firstPtsUs = info.presentationTimeUs
-            val rebased = (info.presentationTimeUs - firstPtsUs).coerceAtLeast(0L)
-            val adjusted = MediaCodec.BufferInfo().apply {
-                set(info.offset, info.size, rebased, info.flags)
+            if (stopped || failed || info.size <= 0 ||
+                info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0) return
+            // Same MONOTONIC clock for both tracks. Never use the first arriving sample
+            // from one track as an epoch for the other track.
+            val pts = (info.presentationTimeUs - originUs).coerceAtLeast(0L)
+            if (!started) {
+                // MediaCodec owns the original buffer; copy before returning it.
+                val src = buffer.duplicate()
+                src.position(info.offset)
+                src.limit(info.offset + info.size)
+                val bytes = ByteArray(info.size)
+                src.get(bytes)
+                pending.addLast(QueuedSample(video, bytes, pts, info.flags))
+                if (pending.size > MAX_PENDING_SAMPLES) {
+                    failed = true
+                    Log.e(TAG, "Encoder did not provide both track formats in time")
+                }
+                return
             }
-            runCatching { muxer.writeSampleData(track, buffer, adjusted) }
-                .onFailure { Log.w(TAG, "writeSampleData failed", it) }
-            bytesWritten += info.size
-            lastPtsUs = rebased
+            writeNow(video, buffer, info.size, pts, info.flags, info.offset)
         }
     }
 
-    fun release() {
-        synchronized(lock) {
-            if (stopped) return
-            stopped = true
-            if (started) {
-                runCatching { muxer.stop() }
-                    .onFailure { Log.w(TAG, "muxer.stop failed", it) }
+    private fun writeNow(
+        video: Boolean,
+        buffer: ByteBuffer,
+        size: Int,
+        ptsUs: Long,
+        flags: Int,
+        offset: Int = 0
+    ) {
+        val track = if (video) videoTrack else audioTrack
+        if (track < 0) return
+        val last = if (video) videoLastPts else audioLastPts
+        val monotonic = maxOf(ptsUs, last + 1)
+        val adjusted = MediaCodec.BufferInfo().apply { set(offset, size, monotonic, flags) }
+        try {
+            muxer.writeSampleData(track, buffer, adjusted)
+            if (video) {
+                videoLastPts = monotonic
+                videoSamples++
+                if (flags and MediaCodec.BUFFER_FLAG_KEY_FRAME != 0) videoSyncSamples++
+            } else {
+                audioLastPts = monotonic
             }
-            runCatching { muxer.release() }
+            bytesWritten += size
+            lastPtsUs = maxOf(lastPtsUs, monotonic)
+        } catch (e: Exception) {
+            failed = true
+            Log.e(TAG, "MP4 writeSampleData failed", e)
         }
+    }
+
+    /** Returns false when the MP4 could not be finalized or contains no video keyframe. */
+    fun release(): Boolean = synchronized(lock) {
+        if (stopped) return@synchronized !failed && videoSamples > 0 && videoSyncSamples > 0
+        stopped = true
+        if (started) {
+            try {
+                muxer.stop()
+            } catch (e: Exception) {
+                failed = true
+                Log.e(TAG, "MP4 finalization failed", e)
+            }
+        } else {
+            failed = true
+        }
+        runCatching { muxer.release() }
+        pending.clear()
+        !failed && videoSamples > 0 && videoSyncSamples > 0
     }
 
     private companion object {
         const val TAG = "MuxerGate"
+        const val MAX_PENDING_SAMPLES = 240
     }
 }
