@@ -75,7 +75,7 @@ class MainActivity : Activity(), CaptureEngine.Listener {
                 val quadrant = OrientationMath.sensorQuadrant(orientation)
                 if (quadrant < 0 || quadrant == queuedQuadrant) return
                 queuedQuadrant = quadrant
-                orientationTask?.let(uiHandler::removeCallbacks)
+                orientationTask?.let { uiHandler.removeCallbacks(it) }
                 val task = Runnable {
                     if (rotationMode != RotationMode.AUTO ||
                         recordingOrientationLocked || engine.state.recording ||
@@ -207,7 +207,7 @@ class MainActivity : Activity(), CaptureEngine.Listener {
 
     override fun onPause() {
         orientationListener.disable()
-        orientationTask?.let(uiHandler::removeCallbacks)
+        orientationTask?.let { uiHandler.removeCallbacks(it) }
         queuedQuadrant = -1
         engine.stop()
         super.onPause()
@@ -306,7 +306,7 @@ class MainActivity : Activity(), CaptureEngine.Listener {
     }
 
     private fun applyRotationMode() {
-        orientationTask?.let(uiHandler::removeCallbacks)
+        orientationTask?.let { uiHandler.removeCallbacks(it) }
         queuedQuadrant = -1
         requestedOrientation = when (rotationMode) {
             RotationMode.AUTO -> ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
