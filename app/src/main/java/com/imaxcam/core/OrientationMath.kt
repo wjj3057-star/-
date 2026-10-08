@@ -18,12 +18,17 @@ object OrientationMath {
     }
 
     /**
-     * Camera2 SurfaceTexture's transform puts the sensor frame into the device's
-     * natural orientation. Applying SENSOR_ORIENTATION again turns the image sideways.
-     * Our texture-space matrix therefore corrects only the display's extra rotation.
+     * SurfaceTexture already accounts for the camera sensor's mounting angle. Rotate
+     * only by the current display angle, using the UV transform expected by CropMatrix.
+     *
+     * IMPORTANT: CropMatrix.build() rotates texture coordinates by -rotationDegrees.
+     * That is an inverse texture lookup, so the visible image rotates by +rotationDegrees.
+     * Negating displayDegrees here inverted the correction on both landscape sides:
+     * a 90-degree turn received -90 and the result was upside-down (180 degrees off).
+     * Keep 0 and 180 unchanged; use +90/+270 for landscape.
      */
     fun textureRotation(displayDegrees: Int): Int =
-        (360 - (displayDegrees % 360 + 360) % 360) % 360
+        (displayDegrees % 360 + 360) % 360
 
     fun naturalSourceSize(width: Int, height: Int, sensorDegrees: Int): Pair<Int, Int> {
         val swap = (sensorDegrees % 180 + 180) % 180 != 0
