@@ -68,6 +68,16 @@ class CropMatrixTest {
     }
 
     @Test
+    fun `portrait video maps a landscape sensor to a tall video frame`() {
+        // 3840x2160 camera buffer becomes a 2160x3088 portrait IMAX file.
+        CropMatrix.build(3840, 2160, 2160, 3088, 90, false, m)
+        val (x0, y0) = map(0f, 0f)
+        val (x1, y1) = map(1f, 1f)
+        assertEquals(3088.0 / 3840.0, abs(x1 - x0).toDouble(), 1e-4)
+        assertEquals(1.0, abs(y1 - y0).toDouble(), 1e-4)
+    }
+
+    @Test
     fun `an uncropped frame yields the identity`() {
         CropMatrix.build(3840, 2160, 3840, 2160, 0, false, m)
         assertMaps(0f, 0f, 0f, 0f)
