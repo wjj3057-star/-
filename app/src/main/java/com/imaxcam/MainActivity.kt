@@ -18,6 +18,7 @@ import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.view.WindowManager
 import android.widget.Button
+import android.widget.ImageButton
 import android.widget.CheckBox
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -27,6 +28,7 @@ import com.imaxcam.core.ImaxFormat
 import com.imaxcam.core.OrientationMath
 import com.imaxcam.core.VideoQuality
 import com.imaxcam.pipeline.CaptureEngine
+import com.imaxcam.ui.ViewfinderOverlay
 import java.util.Locale
 
 /**
@@ -50,7 +52,11 @@ class MainActivity : Activity(), CaptureEngine.Listener {
     private lateinit var recordTimer: TextView
     private lateinit var ratioBar: LinearLayout
     private lateinit var recordButton: Button
-    private lateinit var switchCamera: Button
+    private lateinit var switchCamera: ImageButton
+    private lateinit var settingsButton: ImageButton
+    private lateinit var settingsPanel: LinearLayout
+    private lateinit var captureHint: TextView
+    private lateinit var viewfinder: ViewfinderOverlay
     private lateinit var orientationButton: Button
     private lateinit var qualityButton: Button
     private lateinit var lowLatency: CheckBox
@@ -166,6 +172,10 @@ class MainActivity : Activity(), CaptureEngine.Listener {
 
     private fun bindViews() {
         preview = findViewById(R.id.preview)
+        settingsButton = findViewById(R.id.settingsButton)
+        settingsPanel = findViewById(R.id.settingsPanel)
+        captureHint = findViewById(R.id.captureHint)
+        viewfinder = findViewById(R.id.viewfinder)
         hudMode = findViewById(R.id.hudMode)
         hudSize = findViewById(R.id.hudSize)
         hudAudio = findViewById(R.id.hudAudio)
@@ -247,10 +257,18 @@ class MainActivity : Activity(), CaptureEngine.Listener {
         ImaxFormat.entries.forEach { format ->
             val chip = TextView(this).apply {
                 text = format.label
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
-                setPadding(dp(18), dp(8), dp(18), dp(8))
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+                typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.BOLD)
+                gravity = android.view.Gravity.CENTER
+                minWidth = dp(74)
+                minHeight = dp(40)
+                setPadding(dp(12), dp(9), dp(12), dp(9))
                 setBackgroundResource(R.drawable.bg_chip)
-                setOnClickListener { selectFormat(format) }
+                contentDescription = "${format.label} · ${format.note}"
+                setOnClickListener {
+                    selectFormat(format)
+                    settingsPanel.visibility = View.GONE
+                }
             }
             val params = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -273,13 +291,21 @@ class MainActivity : Activity(), CaptureEngine.Listener {
 
     private fun wireControls() {
         recordButton.setOnClickListener {
+            settingsPanel.visibility = View.GONE
             if (engine.state.recording) {
                 engine.stopRecording()
             } else {
                 engine.startRecording(withAudio = audioEnabled.isChecked)
             }
         }
-        switchCamera.setOnClickListener { cycleCamera() }
+        settingsButton.setOnClickListener {
+            settingsPanel.visibility =
+                if (settingsPanel.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+        }
+        switchCamera.setOnClickListener {
+            settingsPanel.visibility = View.GONE
+            cycleCamera()
+        }
         orientationButton.setOnClickListener {
             if (engine.state.recording || recordingOrientationLocked) return@setOnClickListener
             rotationMode = when (rotationMode) {
@@ -368,22 +394,37 @@ class MainActivity : Activity(), CaptureEngine.Listener {
 
         val crop = state.crop
         hudSize.text = if (crop == null) {
-            "--"
+            "PREPARING CAMERA"
         } else {
             String.format(
-                Locale.US,
-                "%dx%d  %s  %d fps  %d Mbps",
-                crop.outW, crop.outH, state.format.label, state.fps, state.bitrate / 1_000_000
+                Locale.US, "%d × %d   •   %d FPS   •   %d Mb/s",
+                crop.outW, crop.outH, state.fps, state.bitrate / 1_000_000
             )
         }
+        if (crop != null) viewfinder.frameAspect = crop.achievedRatio.toFloat()
 
         hudAudio.text = getString(R.string.audio_actual, state.audioMode)
 
         hudLatency.text = String.format(
-            Locale.US, "latency %s  ·  %.1f fps", state.latency.format(), state.renderFps
+            Locale.US, "LATENCY  %s    /    %.1f FPS", state.latency.format(), state.renderFps
+        )
+        captureHint.text = getString(
+            if (state.recording) R.string.capture_recording else R.string.capture_ready
+        )
+        captureHint.setTextColor(
+            getColor(if (state.recording) R.color.record else R.color.text_secondary)
         )
 
+        if (recordButton.isSelected != state.recording) {
+            recordButton.animate().cancel()
+            recordButton.animate()
+                .scaleX(if (state.recording) 0.94f else 1f)
+                .scaleY(if (state.recording) 0.94f else 1f)
+                .setDuration(170L)
+                .start()
+        }
         recordButton.isSelected = state.recording
+        if (state.recording) settingsPanel.visibility = View.GONE
         recordButton.contentDescription = getString(
             if (state.recording) R.string.record_stop else R.string.record_start
         )
