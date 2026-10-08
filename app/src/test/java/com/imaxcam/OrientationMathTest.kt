@@ -38,23 +38,27 @@ class OrientationMathTest {
     }
 
     @Test fun `landscape rotates native portrait exactly one quarter turn`() {
-        assertEquals(270, OrientationMath.textureRotation(90))
+        assertEquals(90, OrientationMath.textureRotation(90))
         val crop = OrientationMath.surfaceOutputCrop(1920, 1080, 90, 90, 16.0 / 9.0, false)
         assertEquals(1920, crop.outW)
         assertEquals(1080, crop.outH)
         val matrix = FloatArray(16)
-        CropMatrix.build(1080, 1920, crop.outW, crop.outH, 270, false, matrix)
+        CropMatrix.build(1080, 1920, crop.outW, crop.outH, 90, false, matrix)
         assertEquals(0.0, matrix[0].toDouble(), 0.0001)
         assertEquals(0.0, matrix[5].toDouble(), 0.0001)
-        assertEquals(1.0, abs(matrix[1]).toDouble(), 0.0001)
-        assertEquals(1.0, abs(matrix[4]).toDouble(), 0.0001)
+        assertEquals(-1.0, matrix[1].toDouble(), 0.0001)
+        assertEquals(1.0, matrix[4].toDouble(), 0.0001)
     }
 
     @Test fun `reverse landscape is also full-frame and upright`() {
-        assertEquals(90, OrientationMath.textureRotation(270))
+        assertEquals(270, OrientationMath.textureRotation(270))
         val crop = OrientationMath.surfaceOutputCrop(1920, 1080, 90, 270, 16.0 / 9.0, false)
         assertEquals(1920, crop.outW)
         assertEquals(1080, crop.outH)
+        val matrix = FloatArray(16)
+        CropMatrix.build(1080, 1920, crop.outW, crop.outH, 270, false, matrix)
+        assertEquals(1.0, matrix[1].toDouble(), 0.0001)
+        assertEquals(-1.0, matrix[4].toDouble(), 0.0001)
         assertEquals(180, OrientationMath.textureRotation(180))
     }
 
