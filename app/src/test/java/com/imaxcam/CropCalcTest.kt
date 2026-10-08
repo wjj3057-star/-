@@ -3,7 +3,6 @@ package com.imaxcam
 import com.imaxcam.core.CropCalc
 import com.imaxcam.core.ImaxFormat
 import com.imaxcam.core.VideoQuality
-import android.util.Size
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -53,16 +52,21 @@ class CropCalcTest {
 
     @Test
     fun `quality selector chooses supported camera sizes without scaling`() {
-        val sizes = listOf(Size(3840, 2160), Size(1920, 1080), Size(1280, 720))
-        assertEquals(Size(1280, 720), CropCalc.pickSourceForQuality(sizes, VideoQuality.HD))
-        assertEquals(Size(1920, 1080), CropCalc.pickSourceForQuality(sizes, VideoQuality.FULL_HD))
-        assertEquals(Size(3840, 2160), CropCalc.pickSourceForQuality(sizes, VideoQuality.UHD))
+        val sizes = listOf(3840 to 2160, 1920 to 1080, 1280 to 720)
+        fun pick(quality: VideoQuality) =
+            CropCalc.pickNativeResolution(sizes, quality, { it.first }, { it.second })
+        assertEquals(1280 to 720, pick(VideoQuality.HD))
+        assertEquals(1920 to 1080, pick(VideoQuality.FULL_HD))
+        assertEquals(3840 to 2160, pick(VideoQuality.UHD))
     }
 
     @Test
     fun `quality selector falls back to nearest advertised resolution`() {
-        val sizes = listOf(Size(1920, 1080), Size(1280, 720))
-        assertEquals(Size(1920, 1080), CropCalc.pickSourceForQuality(sizes, VideoQuality.UHD))
+        val sizes = listOf(1920 to 1080, 1280 to 720)
+        val chosen = CropCalc.pickNativeResolution(
+            sizes, VideoQuality.UHD, { it.first }, { it.second }
+        )
+        assertEquals(1920 to 1080, chosen)
     }
 
     @Test
