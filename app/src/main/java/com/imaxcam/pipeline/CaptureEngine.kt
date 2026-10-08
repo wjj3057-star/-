@@ -23,6 +23,7 @@ import com.imaxcam.core.CropSpec
 import com.imaxcam.core.FrameRateMeter
 import com.imaxcam.core.ImaxFormat
 import com.imaxcam.core.LatencyMonitor
+import com.imaxcam.core.OrientationMath
 import com.imaxcam.core.VideoQuality
 import com.imaxcam.gl.CropRenderer
 import com.imaxcam.gl.EglCore
@@ -37,6 +38,7 @@ import com.imaxcam.record.VideoEncoder
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Owns the whole capture path: camera -> GPU crop -> HEVC encoder, plus the preview.
@@ -99,6 +101,7 @@ class CaptureEngine(
 
     private val mainHandler = Handler(context.mainLooper)
     private val started = AtomicBoolean(false)
+    private val previewGeneration = AtomicInteger(0)
 
     // --- GL state, render thread only ---------------------------------------------
     private var egl: EglCore? = null
@@ -232,7 +235,9 @@ class CaptureEngine(
 
     fun attachPreview(surface: Surface, width: Int, height: Int) {
         if (!started.get()) return
+        val generation = previewGeneration.incrementAndGet()
         postRender {
+            if (generation != previewGeneration.get() || !started.get()) return@postRender
             previewSurface = surface
             previewWidth = width
             previewHeight = height
@@ -242,16 +247,22 @@ class CaptureEngine(
     }
 
     fun updatePreviewSize(width: Int, height: Int) {
+        if (width <= 0 || height <= 0) return
         postRender {
+            val changed = width != previewWidth || height != previewHeight
             previewWidth = width
             previewHeight = height
+            if (changed && !recording && surfaceTexture != null) recomputeCrop()
         }
     }
 
     fun detachPreview() {
+        // SurfaceDestroyed may race with SurfaceChanged for a replacement surface.
+        val generation = previewGeneration.incrementAndGet()
         postCamera {
             controller?.close()
             postRender {
+                if (generation != previewGeneration.get()) return@postRender
                 previewSurface = null
                 teardownGl()
             }
@@ -382,7 +393,7 @@ class CaptureEngine(
 
         val source = CropCalc.pickSourceForQuality(info.recordSizes, state.quality)
             ?: error("Camera has no supported capture sizes")
-        val crop = outputCrop(source)
+        val crop = outputCrop(source, info)
 
         val texture = SurfaceTexture(textureId).apply {
             setDefaultBufferSize(source.width, source.height)
@@ -440,24 +451,31 @@ class CaptureEngine(
         }.getOrNull()
     }
 
-    /**
-     * The sensor stream stays landscape. In portrait we rotate the crop into a real
-     * portrait encoder surface (height > width), not just a portrait UI preview.
-     */
-    private fun outputCrop(source: Size): CropSpec {
-        val landscape = CropCalc.fit(source, state.format)
-        return if (displayRotationDegrees() % 180 == 0) {
-            landscape.copy(outW = landscape.outH, outH = landscape.outW)
+    private fun cameraRotation(info: CameraInfo): Int =
+        OrientationMath.cameraRotation(
+            info.sensorOrientation, displayRotationDegrees(), info.isFront
+        )
+
+    private fun outputCrop(source: Size, info: CameraInfo): CropSpec {
+        // The Android window and Display.rotation do not necessarily update in the
+        // same callback. Use the actual viewport dimensions to pick output orientation.
+        val portrait = if (previewWidth > 0 && previewHeight > 0) {
+            previewHeight > previewWidth
         } else {
-            landscape
+            context.resources.configuration.orientation !=
+                android.content.res.Configuration.ORIENTATION_LANDSCAPE
         }
+        return OrientationMath.crop(
+            source.width, source.height, state.format.ratio,
+            cameraRotation(info), portrait
+        )
     }
 
     private fun recomputeCrop() {
         val info = state.camera ?: return
         val source = state.sourceSize ?: return
-        val crop = outputCrop(source)
-        val rotation = ((info.sensorOrientation - displayRotationDegrees() + 360) % 360)
+        val crop = outputCrop(source, info)
+        val rotation = cameraRotation(info)
         CropMatrix.build(
             srcW = source.width,
             srcH = source.height,
@@ -478,7 +496,7 @@ class CaptureEngine(
     }
 
     private fun displayRotationDegrees(): Int {
-        val display = context.display ?: return 90
+        val display = context.display ?: return 0
         return when (display.rotation) {
             Surface.ROTATION_0 -> 0
             Surface.ROTATION_90 -> 90
