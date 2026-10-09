@@ -96,3 +96,37 @@ test('CSV escapes formulas and preserves Korean/newlines/quotes',()=>{
   assert.ok(csv.includes('"\'=HYPERLINK(""bad"")"'));
   assert.ok(csv.includes('줄1\n""줄2""'));
 });
+
+test('bulk present marks hundreds of unchecked students atomically without overwriting existing entries',()=>{
+  const s=fixture(),start=C.clone(s.students[0]);
+  s.students=Array.from({length:300},(_,i)=>({...start,id:'student-'+i,name:'학생 '+i}));
+  s.records=[{studentId:'student-0',classId:C.DEFAULT_CLASS_ID,date:'2026-10-08',status:'late',note:'지각 메모',studentName:'학생 0',className:'전체 학생',time:'16:00',updatedAt:now.toISOString()}];
+  const ids=s.students.map(st=>st.id),after=C.markUnmarkedPresent(s,ids,'2026-10-08',now);
+  assert.equal(s.records.length,1);
+  assert.equal(after.records.length,300);
+  assert.equal(after.records.find(r=>r.studentId==='student-0').status,'late');
+  assert.equal(after.records.filter(r=>r.status==='present').length,299);
+  assert.equal(after.records.filter(r=>r.status==='present').every(r=>r.time==='16:17'),true);
+  assert.equal(C.markUnmarkedPresent(after,ids,'2026-10-08',now).records.length,300);
+});
+test('bulk present rejects future days, duplicate IDs, missing and ineligible students without mutating data',()=>{
+  const s=fixture(),snapshot=JSON.stringify(s);
+  assert.throws(()=>C.markUnmarkedPresent(s,['s1'],'2026-10-09',now),/미래 날짜/);
+  assert.throws(()=>C.markUnmarkedPresent(s,['s1','s1'],'2026-10-08',now),/학생 목록/);
+  assert.throws(()=>C.markUnmarkedPresent(s,['s1','not-found'],'2026-10-08',now),/학생을 찾을/);
+  s.students[1].joinedDate='2026-10-09';
+  assert.throws(()=>C.markUnmarkedPresent(s,['s1','s2'],'2026-10-08',now),/등록되어 있지/);
+  s.students[1].joinedDate='2026-10-01';
+  assert.equal(JSON.stringify(s),snapshot);
+});
+test('note-only edits do not create SMS events and daily rollover never resends messages',()=>{
+  let s=fixture();
+  s.students[0].guardians=[{id:'guardian-1',name:'김하늘 어머니',relation:'mother',phone:'01012345678',notify:true,contactId:''}];
+  s.settings.sms.enabled=true;
+  const checked=C.mark(s,'s1','2026-10-08','present','',now);
+  assert.equal(C.smsChanges(s,checked,'2026-10-08').length,1);
+  const edit=C.mark(checked,'s1','2026-10-08','present','메모만 변경',new Date(2026,9,8,16,18));
+  assert.equal(C.smsChanges(checked,edit,'2026-10-08').length,0);
+  assert.equal(C.smsChanges(checked,edit,'2026-10-09').length,0);
+  assert.equal(C.count(C.roster(edit,'2026-10-09')).unmarked,2);
+});
