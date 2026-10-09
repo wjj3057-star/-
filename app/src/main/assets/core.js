@@ -123,6 +123,34 @@
       time:['present','late'].includes(status) ? (old && old.time ? old.time : date === localDate(now) ? `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}` : '') : '',updatedAt:now.toISOString()};
     if (ix >= 0) next.records[ix] = r; else next.records.push(r); return next;
   }
+  // One transaction for bulk check-in: validate all students first, then clone once.
+  // Previously a full JSON clone was made per student, causing quadratic work.
+  function markUnmarkedPresent(state, ids, date, now = new Date()) {
+    if (!validDate(date) || date > localDate(now)) throw new Error('미래 날짜에는 출석을 기록할 수 없습니다.');
+    if (!Array.isArray(ids) || ids.length > 5000 || new Set(ids).size !== ids.length) throw new Error('학생 목록을 확인해 주세요.');
+    const students = new Map(state.students.map(s => [s.id, s]));
+    const already = new Set(state.records.filter(r => r.date === date).map(r => r.studentId));
+    const pending = [];
+    for (const id of ids) {
+      const student = students.get(id);
+      if (!student) throw new Error('학생을 찾을 수 없습니다.');
+      if (already.has(id)) continue;
+      if (date < student.joinedDate || (!student.active && (!student.archivedDate || date >= student.archivedDate))) {
+        throw new Error('이 날짜에는 등록되어 있지 않은 학생입니다.');
+      }
+      const group = classOf(state, student.classId);
+      if (!group) throw new Error('학생 출석 정보를 찾을 수 없습니다.');
+      pending.push({student,group});
+    }
+    const next = clone(state);
+    const time = date === localDate(now) ? `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}` : '';
+    const updatedAt = now.toISOString();
+    for (const {student,group} of pending) {
+      next.records.push({studentId:student.id,classId:group.id,date,status:'present',note:'',
+        studentName:student.name,className:group.name,time,updatedAt});
+    }
+    return next;
+  }
   function report(state, month, classId = 'all') {
     const records = state.records.filter(r => r.date.startsWith(month + '-'));
     const totals = count(records.map(r => ({record:r})));
@@ -193,5 +221,5 @@
     const prior=new Map(before.records.map(r=>[r.studentId+'|'+r.date,r]));
     return after.records.filter(r=>r.date===today&&after.settings.sms.statuses.includes(r.status)&&(!prior.has(r.studentId+'|'+r.date)||prior.get(r.studentId+'|'+r.date).status!==r.status)&&after.students.some(s=>s.id===r.studentId&&s.active&&s.guardians.some(g=>g.notify))).map(r=>({studentId:r.studentId,date:r.date,status:r.status,updatedAt:r.updatedAt}));
   }
-  return {STATUSES,LABELS,DEFAULT_TEMPLATE,DEFAULT_KEYWORDS,DEFAULT_CLASS_ID,TOKENS,normalizePhone,nameKey,parseContactName,contactCandidates,mergeCandidates,renderSms,smsChanges,clone,localDate,validDate,shiftDate,uid,fresh,upgrade,validate,classOf,recordOf,roster,count,mark,report,csv,csvCell,backup,parseBackup};
+  return {STATUSES,LABELS,DEFAULT_TEMPLATE,DEFAULT_KEYWORDS,DEFAULT_CLASS_ID,TOKENS,normalizePhone,nameKey,parseContactName,contactCandidates,mergeCandidates,renderSms,smsChanges,clone,localDate,validDate,shiftDate,uid,fresh,upgrade,validate,classOf,recordOf,roster,count,mark,markUnmarkedPresent,report,csv,csvCell,backup,parseBackup};
 });
