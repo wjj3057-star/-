@@ -68,7 +68,7 @@ async function main(){
       },tab);
       console.log('NAV_DIAGNOSTICS',width,JSON.stringify(metrics));
       await click(`[data-action=tab][data-tab=${tab}]`);
-      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth+1),false,`${tab} overflows at ${width}px`);
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>(window.visualViewport?.width||window.innerWidth)+1),false,`${tab} overflows at ${width}px`);
     }
   }
   // Simulate the 00:00 date rollover: records remain, today's roster becomes unchecked.
