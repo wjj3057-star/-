@@ -113,7 +113,7 @@
     if (typeof note !== 'undefined' && !text(note, 200)) throw new Error('메모는 200자 이내로 입력해 주세요.');
     const s = state.students.find(x => x.id === id); if (!s) throw new Error('학생을 찾을 수 없습니다.');
     const old = recordOf(state,id,date);
-    const c = classOf(state, old ? old.classId : s.classId); if (!c) throw new Error('반을 찾을 수 없습니다.');
+    const c = classOf(state, old ? old.classId : s.classId); if (!c) throw new Error('학생 출석 정보를 찾을 수 없습니다.');
     if (!old && (date < s.joinedDate || (!s.active && (!s.archivedDate || date >= s.archivedDate)))) throw new Error('이 날짜에는 등록되어 있지 않은 학생입니다.');
     const next = clone(state);
     const ix = next.records.findIndex(r => r.studentId === id && r.date === date);
@@ -135,7 +135,7 @@
     return '"' + s.replace(/"/g, '""') + '"';
   }
   function csv(records) {
-    return '\uFEFF' + [['날짜','학생','반','출석 상태','체크 시간','메모'],...records.slice().sort((a,b) => a.date.localeCompare(b.date) || a.studentName.localeCompare(b.studentName,'ko')).map(r => [r.date,r.studentName,r.className,LABELS[r.status],r.time,r.note])].map(row => row.map(csvCell).join(',')).join('\r\n');
+    return '\uFEFF' + [['날짜','학생','출석 상태','체크 시간','메모'],...records.slice().sort((a,b) => a.date.localeCompare(b.date) || a.studentName.localeCompare(b.studentName,'ko')).map(r => [r.date,r.studentName,LABELS[r.status],r.time,r.note])].map(row => row.map(csvCell).join(',')).join('\r\n');
   }
   function backup(state) { return JSON.stringify({app:'오늘출석',exportedAt:new Date().toISOString(),data:validate(state)},null,2); }
   function parseBackup(raw) {
@@ -177,7 +177,7 @@
       let s=row.targetId==='new'?null:next.students.find(s=>s.id===row.targetId);
       if(row.targetId!=='new'&&!s)throw new Error('연결할 학생을 찾지 못했어요.');
       const targetKey=s?s.id:'new:'+nameKey(name)+':'+classId;if(targets.has(targetKey))throw new Error('같은 학생이 두 번 선택됐어요. 등록 대상을 확인해 주세요.');targets.add(targetKey);
-      if(!s){if(next.students.some(s=>s.active&&s.classId===classId&&nameKey(s.name)===nameKey(name)))throw new Error(name+' 학생이 이미 이 반에 있어요. 기존 학생 연결을 선택해 주세요.');s={id:uid(),name,classId,memo:'',active:true,joinedDate:date,archivedDate:null,phone:'',contactId:'',guardians:[]};next.students.push(s);added++;}else updated++;
+      if(!s){if(next.students.some(s=>s.active&&s.classId===classId&&nameKey(s.name)===nameKey(name)))throw new Error(name+' 학생이 이미 등록되어 있어요. 기존 학생 연결을 선택해 주세요.');s={id:uid(),name,classId,memo:'',active:true,joinedDate:date,archivedDate:null,phone:'',contactId:'',guardians:[]};next.students.push(s);added++;}else updated++;
       if(row.studentContact){const phone=normalizePhone(row.studentContact.phone);if(s.phone&&s.phone!==phone)throw new Error(name+' 학생의 기존 번호와 달라요. 학생 정보 수정에서 직접 변경해 주세요.');s.phone=phone;s.contactId=row.studentContact.contactId;}
       for(const g of row.guardians){const phone=normalizePhone(g.phone);if(!phone)throw new Error('학부모 번호를 확인해 주세요.');if(s.guardians.some(x=>normalizePhone(x.phone)===phone))continue;s.guardians.push({id:uid(),name:g.name,relation:g.relation,phone,contactId:g.contactId,notify:true});}
       if(s.guardians.length>6)throw new Error(name+' 학생의 학부모 연락처는 최대 6개까지 등록할 수 있어요.');
