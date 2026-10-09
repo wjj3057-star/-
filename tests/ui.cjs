@@ -67,7 +67,7 @@ async function main(){
           navZ:getComputedStyle(nav).zIndex,hit:el?.className||el?.tagName};
       },tab);
       console.log('NAV_DIAGNOSTICS',width,JSON.stringify(metrics));
-      if(tab==='settings'&&width===320)console.log('OVERFLOW_DIAGNOSTICS',JSON.stringify(await page.evaluate(()=>{
+      if(false && tab==='settings'&&width===320)console.log('OVERFLOW_DIAGNOSTICS',JSON.stringify(await page.evaluate(()=>{
         const screenWidth=window.visualViewport.width;
         return [...document.querySelectorAll('.app-shell *')].map(el=>{
           const rect=el.getBoundingClientRect(),style=getComputedStyle(el);
@@ -77,6 +77,14 @@ async function main(){
         }).filter(x=>x.right>screenWidth+1||x.left< -1).slice(0,35);
       })));
       await click(`[data-action=tab][data-tab=${tab}]`);
+      if(tab==='reports' && width===320)console.log('ACTUAL_OVERFLOW',JSON.stringify(await page.evaluate(()=>{
+        const vw=window.visualViewport.width;
+        return {innerWidth,visualWidth:vw,scrollWidth:document.documentElement.scrollWidth,
+          candidates:[...document.querySelectorAll('.app-shell *')].map(el=>{
+            const r=el.getBoundingClientRect();
+            return {tag:el.tagName,cls:String(el.className).slice(0,60),left:Math.round(r.left),right:Math.round(r.right),width:Math.round(r.width)};
+          }).filter(e=>e.right>vw+1||e.left < -1).slice(0,20)};
+      })));
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>(window.visualViewport?.width||window.innerWidth)+1),false,`${tab} overflows at ${width}px`);
     }
   }
