@@ -58,6 +58,15 @@ async function main(){
   for(const width of [320,390,800]){
     await page.setViewportSize({width,height:844});
     for(const tab of ['attendance','students','reports','settings']){
+      const metrics=await page.evaluate(tab=>{
+        const node=document.querySelector('[data-action=tab][data-tab='+tab+']');
+        const a=node.getBoundingClientRect(), nav=document.querySelector('.nav'), n=nav.getBoundingClientRect();
+        const el=document.elementFromPoint(a.x+a.width/2,a.y+a.height/2);
+        return {tab,viewport:[innerWidth,innerHeight],visualViewport:[visualViewport.width,visualViewport.height],
+          button:[a.x,a.y,a.width,a.height],nav:[n.x,n.y,n.width,n.height],navPosition:getComputedStyle(nav).position,
+          navZ:getComputedStyle(nav).zIndex,hit:el?.className||el?.tagName};
+      },tab);
+      console.log('NAV_DIAGNOSTICS',width,JSON.stringify(metrics));
       await click(`[data-action=tab][data-tab=${tab}]`);
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth+1),false,`${tab} overflows at ${width}px`);
     }
