@@ -129,7 +129,12 @@ public final class MainActivity extends Activity {
     public final class Bridge {
         @JavascriptInterface public String readState() {
             synchronized (stateLock) {
-                try { return envelope(true, new String(readLimited(dataFile.openRead()), StandardCharsets.UTF_8)); }
+                try {
+                    byte[] bytes = readLimited(dataFile.openRead());
+                    // Existing but empty files are corrupt, not first-run state.
+                    if (bytes.length == 0) return envelope(false, "");
+                    return envelope(true, new String(bytes, StandardCharsets.UTF_8));
+                }
                 catch (FileNotFoundException error) {
                     boolean exists = dataFile.getBaseFile().exists() || new File(dataFile.getBaseFile() + ".bak").exists();
                     return envelope(!exists, "");
