@@ -1,0 +1,65 @@
+name: Academy Attendance CI
+on:
+  push:
+    branches:
+      - codex/academy-attendance-android
+  workflow_dispatch:
+
+jobs:
+  verify:
+    name: Tests, Android build and APK verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Python 3
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: JavaScript syntax checks
+        run: |
+          node --check app/src/main/assets/core.js
+          node --check app/src/main/assets/app.js
+          node --check app/src/main/assets/contacts-sms.js
+          node --check tests/core.test.cjs
+          node --check tests/contacts-sms.test.cjs
+          node --check tests/ui.cjs
+          node --check tests/contacts-ui.cjs
+      - name: Node unit tests
+        run: node --test tests/core.test.cjs tests/contacts-sms.test.cjs
+      - name: SMS rules Java unit tests
+        run: |
+          mkdir -p out/sms-tests
+          javac -encoding UTF-8 -d out/sms-tests app/src/main/java/kr/academy/attendance/SmsRules.java tests/SmsRulesTest.java
+          java -cp out/sms-tests SmsRulesTest
+      - name: Browser test dependencies
+        run: |
+          npm install --no-save playwright
+          npx playwright install --with-deps chromium
+      - name: Full UI integration tests
+        run: |
+          node tests/ui.cjs
+          node tests/contacts-ui.cjs
+      - name: Install Android SDK 35
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - name: Build and verify test APK
+        run: python scripts/build_apk.py
+      - name: Publish test build
+        uses: actions/upload-artifact@v4
+        with:
+          name: academy-attendance-ci-unsigned-release-test-key
+          path: out/AcademyAttendance.apk
+          retention-days: 7
