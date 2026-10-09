@@ -5,7 +5,7 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   'use strict';
   const STATUSES = ['present', 'late', 'absent', 'excused'];
-  const LABELS = {present: '출석', late: '지각', absent: '결석', excused: '공결', unmarked: '미확인'};
+  const LABELS = {present: '출석', late: '지각', absent: '결석', excused: '공결', unmarked: '미출석'};
   const clone = value => JSON.parse(JSON.stringify(value));
   function localDate(date = new Date()) {
     return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
@@ -27,7 +27,11 @@
   const DEFAULT_TEMPLATE = '[{학원명}] {학생이름} 학생이 {날짜} {시간}에 {상태} 처리되었습니다.';
   const DEFAULT_KEYWORDS = {mother:['어머니','어머님','엄마','모친'],father:['아버지','아버님','아빠','부친'],guardian:['보호자'],student:['학생']};
   const TOKENS = ['학원명','학생이름','반이름','날짜','시간','상태','선생님','메모'];
-  function fresh() { return {schema: 2, settings: {academy: '우리 학원', teacher: '',sms:{enabled:false,statuses:['present','late'],template:DEFAULT_TEMPLATE},contactKeywords:clone(DEFAULT_KEYWORDS)}, classes: [], students: [], records: []}; }
+  // The single internal group is a compatibility key, not a user-facing class.
+  // Old class rows remain stored solely so historical attendance references still validate.
+  const DEFAULT_CLASS_ID = '_all_students_';
+  function singleClass() { return {id:DEFAULT_CLASS_ID,name:'전체 학생',color:'#8974C9',days:[0,1,2,3,4,5,6],time:'00:00',archived:false}; }
+  function fresh() { return {schema: 2, settings: {academy: '우리 학원', teacher: '',sms:{enabled:false,statuses:['present','late'],template:DEFAULT_TEMPLATE},contactKeywords:clone(DEFAULT_KEYWORDS)}, classes: [singleClass()], students: [], records: []}; }
   function normalizePhone(value) {
     if (typeof value !== 'string' || !/^[+\d\s().-]*$/.test(value)) return '';
     let n=value.replace(/[\s().-]/g,'');
@@ -46,13 +50,20 @@
   }
   function validate(value) {
     value=upgrade(value);
+    // Migrate legacy multi-class data without deleting students or dated records.
+    if (value && value.schema === 2 && Array.isArray(value.classes) && Array.isArray(value.students)) {
+      value=clone(value);
+      if (!value.classes.some(c=>c && c.id===DEFAULT_CLASS_ID)) value.classes.push(singleClass());
+      else value.classes=value.classes.map(c=>c && c.id===DEFAULT_CLASS_ID?singleClass():c);
+      value.students.forEach(s=>{if(s && typeof s==='object')s.classId=DEFAULT_CLASS_ID;});
+    }
     const fail = () => { throw new Error('올바른 오늘출석 백업 파일이 아닙니다. 원래 데이터는 유지됩니다.'); };
     if (!value || value.schema !== 2 || !value.settings || !text(value.settings.academy, 40, true) || !text(value.settings.teacher, 30)) fail();
     const sms=value.settings.sms,kw=value.settings.contactKeywords;
     if(!sms||typeof sms.enabled!=='boolean'||!Array.isArray(sms.statuses)||sms.statuses.length>4||!sms.statuses.length||new Set(sms.statuses).size!==sms.statuses.length||sms.statuses.some(s=>!STATUSES.includes(s))||!text(sms.template,500,true)||!kw)fail();
     for(const role of Object.keys(DEFAULT_KEYWORDS))if(!Array.isArray(kw[role])||kw[role].length>20||!kw[role].length||kw[role].some(k=>!text(k,20,true)))fail();
     const allKeywords=Object.values(kw).flat().map(k=>k.trim());if(new Set(allKeywords).size!==allKeywords.length)fail();
-    if (!Array.isArray(value.classes) || value.classes.length > 200 || !Array.isArray(value.students) || value.students.length > 5000 || !Array.isArray(value.records) || value.records.length > 100000) fail();
+    if (!Array.isArray(value.classes) || value.classes.length > 201 || !Array.isArray(value.students) || value.students.length > 5000 || !Array.isArray(value.records) || value.records.length > 100000) fail();
     const ids = new Set(), studentIds = new Set(), keys = new Set();
     const idOK = x => typeof x === 'string' && /^[a-zA-Z0-9_-]{1,80}$/.test(x);
     for (const c of value.classes) {
@@ -79,19 +90,18 @@
   }
   function classOf(state, id) { return state.classes.find(c => c.id === id); }
   function recordOf(state, id, date) { return state.records.find(r => r.studentId === id && r.date === date); }
-  function roster(state, date, classId = 'all', scheduledOnly = true, query = '') {
-    const day = new Date(date + 'T12:00:00').getDay();
+  function roster(state, date, _classId = 'all', _scheduledOnly = true, query = '') {
     const records = new Map(state.records.filter(r => r.date === date).map(r => [r.studentId, r]));
     const needle = query.trim().toLocaleLowerCase();
+    const group = classOf(state, DEFAULT_CLASS_ID) || singleClass();
     return state.students.map(s => {
       const r = records.get(s.id);
-      const c = classOf(state, r ? r.classId : s.classId);
       const eligible = s.joinedDate <= date && (s.active || (s.archivedDate && date < s.archivedDate));
-      if (!c || (!r && (!eligible || c.archived || (scheduledOnly && !c.days.includes(day)))) || (classId !== 'all' && c.id !== classId)) return null;
+      if (!r && !eligible) return null;
       const name = r ? r.studentName : s.name;
-      if (needle && !(name + ' ' + (r ? r.className : c.name)).toLocaleLowerCase().includes(needle)) return null;
-      return {student:s, group:c, record:r || null, name, groupName:r ? r.className : c.name};
-    }).filter(Boolean).sort((a,b) => a.group.time.localeCompare(b.group.time) || a.name.localeCompare(b.name, 'ko'));
+      if (needle && !name.toLocaleLowerCase().includes(needle)) return null;
+      return {student:s, group, record:r || null, name, groupName:''};
+    }).filter(Boolean).sort((a,b) => a.name.localeCompare(b.name, 'ko'));
   }
   function count(rows) {
     const totals = {present:0,late:0,absent:0,excused:0,unmarked:0,total:rows.length};
@@ -114,7 +124,7 @@
     if (ix >= 0) next.records[ix] = r; else next.records.push(r); return next;
   }
   function report(state, month, classId = 'all') {
-    const records = state.records.filter(r => r.date.startsWith(month + '-') && (classId === 'all' || r.classId === classId));
+    const records = state.records.filter(r => r.date.startsWith(month + '-'));
     const totals = count(records.map(r => ({record:r})));
     const denom = totals.present + totals.late + totals.absent;
     return {records,totals,rate:denom ? Math.round((totals.present + totals.late) / denom * 100) : null};
@@ -158,9 +168,9 @@
     }
     return [...groups.values()].sort((a,b)=>a.name.localeCompare(b.name,'ko'));
   }
-  function mergeCandidates(state,rows,classId,date=localDate()){
-    if(!classOf(state,classId)||classOf(state,classId).archived)throw new Error('등록할 반을 선택해 주세요.');
-    const next=clone(state);let added=0,updated=0;const targets=new Set();
+  function mergeCandidates(state,rows,_unusedClassId=DEFAULT_CLASS_ID,date=localDate()){
+    const classId=DEFAULT_CLASS_ID;
+    const next=validate(state);let added=0,updated=0;const targets=new Set();
     for(const row of rows){
       const name=String(row.name||'').trim();if(!name||name.length>30)throw new Error('학생 이름은 1~30자로 입력해 주세요.');
       if(row.targetId==='unresolved')throw new Error(name+' 학생의 연결 대상을 직접 선택해 주세요.');
@@ -183,5 +193,5 @@
     const prior=new Map(before.records.map(r=>[r.studentId+'|'+r.date,r]));
     return after.records.filter(r=>r.date===today&&after.settings.sms.statuses.includes(r.status)&&(!prior.has(r.studentId+'|'+r.date)||prior.get(r.studentId+'|'+r.date).status!==r.status)&&after.students.some(s=>s.id===r.studentId&&s.active&&s.guardians.some(g=>g.notify))).map(r=>({studentId:r.studentId,date:r.date,status:r.status,updatedAt:r.updatedAt}));
   }
-  return {STATUSES,LABELS,DEFAULT_TEMPLATE,DEFAULT_KEYWORDS,TOKENS,normalizePhone,nameKey,parseContactName,contactCandidates,mergeCandidates,renderSms,smsChanges,clone,localDate,validDate,shiftDate,uid,fresh,upgrade,validate,classOf,recordOf,roster,count,mark,report,csv,csvCell,backup,parseBackup};
+  return {STATUSES,LABELS,DEFAULT_TEMPLATE,DEFAULT_KEYWORDS,DEFAULT_CLASS_ID,TOKENS,normalizePhone,nameKey,parseContactName,contactCandidates,mergeCandidates,renderSms,smsChanges,clone,localDate,validDate,shiftDate,uid,fresh,upgrade,validate,classOf,recordOf,roster,count,mark,report,csv,csvCell,backup,parseBackup};
 });
