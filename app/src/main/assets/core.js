@@ -188,11 +188,29 @@
     return null;
   }
   function contactCandidates(contacts,state,keywords=state.settings.contactKeywords) {
-    const groups=new Map();
-    for(const c of contacts){const p=parseContactName(c.name,keywords),phone=normalizePhone(c.phone);if(!p||!phone)continue;const key=nameKey(p.studentName);if(!groups.has(key))groups.set(key,{key,name:p.studentName,guardians:[],studentContacts:[],matches:[]});const group=groups.get(key);const target=p.role==='student'?group.studentContacts:group.guardians;if(!target.some(x=>x.phone===phone))target.push({name:String(c.name).slice(0,80),phone,contactId:String(c.id||''),relation:p.role});}
+    const groups=new Map(),exactNames=new Map(),existingStudents=new Map();
+    for(const student of state.students){
+      const key=nameKey(student.name);
+      if(!existingStudents.has(key))existingStudents.set(key,[]);
+      existingStudents.get(key).push(student.id);
+    }
+    for(const c of contacts){
+      const phone=normalizePhone(c.phone);
+      if(!phone)continue;
+      const key=nameKey(c.name);
+      if(!exactNames.has(key))exactNames.set(key,[]);
+      exactNames.get(key).push({name:c.name,phone,contactId:String(c.id||''),relation:'student'});
+      const p=parseContactName(c.name,keywords);
+      if(!p)continue;
+      const groupKey=nameKey(p.studentName);
+      if(!groups.has(groupKey))groups.set(groupKey,{key:groupKey,name:p.studentName,guardians:[],studentContacts:[],matches:[]});
+      const group=groups.get(groupKey),target=p.role==='student'?group.studentContacts:group.guardians;
+      if(!target.some(x=>x.phone===phone))target.push({name:String(c.name).slice(0,80),phone,contactId:String(c.id||''),relation:p.role});
+    }
     for(const group of groups.values()){
-      for(const c of contacts)if(nameKey(c.name)===group.key&&normalizePhone(c.phone)&&!group.studentContacts.some(s=>s.phone===normalizePhone(c.phone)))group.studentContacts.push({name:c.name,phone:normalizePhone(c.phone),contactId:String(c.id||''),relation:'student'});
-      group.matches=state.students.filter(s=>nameKey(s.name)===group.key).map(s=>s.id);
+      for(const c of exactNames.get(group.key)||[])
+        if(!group.studentContacts.some(s=>s.phone===c.phone))group.studentContacts.push(c);
+      group.matches=existingStudents.get(group.key)||[];
     }
     return [...groups.values()].sort((a,b)=>a.name.localeCompare(b.name,'ko'));
   }
@@ -205,7 +223,7 @@
       let s=row.targetId==='new'?null:next.students.find(s=>s.id===row.targetId);
       if(row.targetId!=='new'&&!s)throw new Error('연결할 학생을 찾지 못했어요.');
       const targetKey=s?s.id:'new:'+nameKey(name)+':'+classId;if(targets.has(targetKey))throw new Error('같은 학생이 두 번 선택됐어요. 등록 대상을 확인해 주세요.');targets.add(targetKey);
-      if(!s){if(next.students.some(s=>s.active&&s.classId===classId&&nameKey(s.name)===nameKey(name)))throw new Error(name+' 학생이 이미 등록되어 있어요. 기존 학생 연결을 선택해 주세요.');s={id:uid(),name,classId,memo:'',active:true,joinedDate:date,archivedDate:null,phone:'',contactId:'',guardians:[]};next.students.push(s);added++;}else updated++;
+      if(!s){s={id:uid(),name,classId,memo:'',active:true,joinedDate:date,archivedDate:null,phone:'',contactId:'',guardians:[]};next.students.push(s);added++;}else updated++;
       if(row.studentContact){const phone=normalizePhone(row.studentContact.phone);if(s.phone&&s.phone!==phone)throw new Error(name+' 학생의 기존 번호와 달라요. 학생 정보 수정에서 직접 변경해 주세요.');s.phone=phone;s.contactId=row.studentContact.contactId;}
       for(const g of row.guardians){const phone=normalizePhone(g.phone);if(!phone)throw new Error('학부모 번호를 확인해 주세요.');if(s.guardians.some(x=>normalizePhone(x.phone)===phone))continue;s.guardians.push({id:uid(),name:g.name,relation:g.relation,phone,contactId:g.contactId,notify:true});}
       if(s.guardians.length>6)throw new Error(name+' 학생의 학부모 연락처는 최대 6개까지 등록할 수 있어요.');
