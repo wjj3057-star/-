@@ -24,7 +24,7 @@ async function main(){
   const context=await browser.newContext({viewport:{width:390,height:844},deviceScaleFactor:1,isMobile:true,hasTouch:true,locale:'ko-KR',timezoneId:'Asia/Seoul',acceptDownloads:true});
   const page=await context.newPage();page.on('pageerror',error=>failures.push(error.message));
   await page.clock.install({time:new Date('2026-10-08T07:30:00Z')});
-  const click=async selector=>{await page.locator(selector).click();};
+  const click=async selector=>{await page.locator(selector).click({timeout:6000});};
   const read=()=>page.evaluate(()=>JSON.parse(localStorage.getItem('oneul-attendance-v1')));
   await page.goto(url);await page.getByRole('heading',{name:'출석 체크',exact:true}).waitFor();
   await page.getByRole('button',{name:'학생 등록하기',exact:true}).click();
@@ -67,6 +67,15 @@ async function main(){
           navZ:getComputedStyle(nav).zIndex,hit:el?.className||el?.tagName};
       },tab);
       console.log('NAV_DIAGNOSTICS',width,JSON.stringify(metrics));
+      if(tab==='settings'&&width===320)console.log('OVERFLOW_DIAGNOSTICS',JSON.stringify(await page.evaluate(()=>{
+        const screenWidth=window.visualViewport.width;
+        return [...document.querySelectorAll('.app-shell *')].map(el=>{
+          const rect=el.getBoundingClientRect(),style=getComputedStyle(el);
+          return {node:el.tagName.toLowerCase(),cls:String(el.className).slice(0,70),
+            right:Math.round(rect.right),left:Math.round(rect.left),width:Math.round(rect.width),
+            minWidth:style.minWidth,display:style.display};
+        }).filter(x=>x.right>screenWidth+1||x.left< -1).slice(0,35);
+      })));
       await click(`[data-action=tab][data-tab=${tab}]`);
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>(window.visualViewport?.width||window.innerWidth)+1),false,`${tab} overflows at ${width}px`);
     }
