@@ -24,7 +24,7 @@ async function main(){
   const context=await browser.newContext({viewport:{width:390,height:844},deviceScaleFactor:1,isMobile:true,hasTouch:true,locale:'ko-KR',timezoneId:'Asia/Seoul',acceptDownloads:true});
   const page=await context.newPage();page.on('pageerror',error=>failures.push(error.message));
   await page.clock.install({time:new Date('2026-10-08T07:30:00Z')});
-  const click=async selector=>{await page.locator(selector).click({timeout:6000});};
+  const click=async selector=>{await page.locator(selector).click();};
   const read=()=>page.evaluate(()=>JSON.parse(localStorage.getItem('oneul-attendance-v1')));
   await page.goto(url);await page.getByRole('heading',{name:'출석 체크',exact:true}).waitFor();
   await page.getByRole('button',{name:'학생 등록하기',exact:true}).click();
@@ -58,33 +58,7 @@ async function main(){
   for(const width of [320,390,800]){
     await page.setViewportSize({width,height:844});
     for(const tab of ['attendance','students','reports','settings']){
-      const metrics=await page.evaluate(tab=>{
-        const node=document.querySelector('[data-action=tab][data-tab='+tab+']');
-        const a=node.getBoundingClientRect(), nav=document.querySelector('.nav'), n=nav.getBoundingClientRect();
-        const el=document.elementFromPoint(a.x+a.width/2,a.y+a.height/2);
-        return {tab,viewport:[innerWidth,innerHeight],visualViewport:[visualViewport.width,visualViewport.height],
-          button:[a.x,a.y,a.width,a.height],nav:[n.x,n.y,n.width,n.height],navPosition:getComputedStyle(nav).position,
-          navZ:getComputedStyle(nav).zIndex,hit:el?.className||el?.tagName};
-      },tab);
-      console.log('NAV_DIAGNOSTICS',width,JSON.stringify(metrics));
-      if(false && tab==='settings'&&width===320)console.log('OVERFLOW_DIAGNOSTICS',JSON.stringify(await page.evaluate(()=>{
-        const screenWidth=window.visualViewport.width;
-        return [...document.querySelectorAll('.app-shell *')].map(el=>{
-          const rect=el.getBoundingClientRect(),style=getComputedStyle(el);
-          return {node:el.tagName.toLowerCase(),cls:String(el.className).slice(0,70),
-            right:Math.round(rect.right),left:Math.round(rect.left),width:Math.round(rect.width),
-            minWidth:style.minWidth,display:style.display};
-        }).filter(x=>x.right>screenWidth+1||x.left< -1).slice(0,35);
-      })));
       await click(`[data-action=tab][data-tab=${tab}]`);
-      if(tab==='reports' && width===320)console.log('ACTUAL_OVERFLOW',JSON.stringify(await page.evaluate(()=>{
-        const vw=window.visualViewport.width;
-        return {innerWidth,visualWidth:vw,scrollWidth:document.documentElement.scrollWidth,
-          candidates:[...document.querySelectorAll('.app-shell *')].map(el=>{
-            const r=el.getBoundingClientRect();
-            return {tag:el.tagName,cls:String(el.className).slice(0,60),left:Math.round(r.left),right:Math.round(r.right),width:Math.round(r.width)};
-          }).filter(e=>e.right>vw+1||e.left < -1).slice(0,20)};
-      })));
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>(window.visualViewport?.width||window.innerWidth)+1),false,`${tab} overflows at ${width}px`);
     }
   }
