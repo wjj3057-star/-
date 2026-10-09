@@ -32,12 +32,12 @@
       const raw = JSON.stringify(next);
       if (native) {
         const result = JSON.parse(native.saveState(raw));
-        if (!result.ok) throw new Error('저장에 실패했습니다. 기기의 저장 공간을 확인해 주세요.');
+        if (!result.ok) throw new Error(result.error||'저장에 실패했습니다. 기기의 저장 공간을 확인해 주세요.');
       } else localStorage.setItem('oneul-attendance-v1', raw);
       undoState = undo ? C.clone(state) : null;
       state = next; loadError = ''; render();
       if (message) toast(message, undo); return true;
-    } catch (error) { toast(error.message || '저장하지 못했습니다. 다시 시도해 주세요.'); return false; }
+    } catch (error) { const message=error.message||'저장하지 못했습니다. 다시 시도해 주세요.';if($('#form-error'))formError(message);else toast(message);return false; }
   }
   function saveAttendance(next,message){const previous=state;const ok=save(next,message,true);if(ok&&window.ContactSms)window.ContactSms.afterAttendanceSave(previous,state);return ok;}
   function toast(message, undo = false) {
@@ -96,21 +96,21 @@
   }
   function settings() {
     const settingsRow=(action,im,label,sub)=>`<button class="settings-row" data-action="${action}"><span class="settings-icon">${icon(im)}</span><span class="settings-label"><b>${e(label)}</b><small>${e(sub)}</small></span>${icon('right')}</button>`;
-    return head('설정','우리 학원에 맞게 관리해 보세요')+`<div class="settings-layout"><section><div class="settings-title">학원 정보</div><div class="settings-card">${settingsRow('academy-edit','home',state.settings.academy,state.settings.teacher?state.settings.teacher+' 선생님':'학원 이름과 선생님 이름 설정')}</div><div class="settings-title">출석 관리</div><div class="white-card"><div class="row" style="color:#8873ad;margin-bottom:11px">${icon('calendar')}<h3>매일 자정 자동 초기화</h3></div><p class="modal-copy">매일 오전 0시에 새로운 출석부로 전환되어 모든 학생이 미출석으로 표시돼요. 어제까지의 출결 기록은 삭제되지 않고 출석 기록에서 조회할 수 있어요.</p></div></section><section>${window.ContactSms?window.ContactSms.settingsHTML():''}<div class="settings-title">데이터 관리</div><div class="settings-card">${settingsRow('backup','download','전체 데이터 백업','학생·출석 기록을 JSON 파일로 저장')}${settingsRow('import','upload','백업 파일 복원','저장해 둔 백업으로 현재 데이터를 교체')}${settingsRow('export-all','chart','전체 출석 기록 내보내기','엑셀에서 열 수 있는 CSV 파일로 저장')}</div><div class="white-card"><div class="row" style="color:#8873ad;margin-bottom:11px">${icon('shield')}<h3>이 기기에 안전하게 보관</h3></div><p class="modal-copy">학생 정보와 출석 기록은 이 기기에 저장돼요. 연락처 연동은 읽기 권한을, 학부모 문자는 SMS 권한과 문자 발송이 가능한 SIM을 사용해요. 다른 기기와 자동 동기화되지 않아요.</p><p class="hint">기기를 바꾸거나 앱을 삭제하기 전에 전체 데이터를 백업해 주세요.</p></div><p class="hint" style="text-align:center">오늘출석 1.2.0</p></section></div>`;
+    return head('설정','우리 학원에 맞게 관리해 보세요')+`<div class="settings-layout"><section><div class="settings-title">학원 정보</div><div class="settings-card">${settingsRow('academy-edit','home',state.settings.academy,state.settings.teacher?state.settings.teacher+' 선생님':'학원 이름과 선생님 이름 설정')}</div><div class="settings-title">출석 관리</div><div class="white-card"><div class="row" style="color:#8873ad;margin-bottom:11px">${icon('calendar')}<h3>매일 자정 자동 초기화</h3></div><p class="modal-copy">매일 오전 0시에 새로운 출석부로 전환되어 모든 학생이 미출석으로 표시돼요. 어제까지의 출결 기록은 삭제되지 않고 출석 기록에서 조회할 수 있어요.</p></div></section><section>${window.ContactSms?window.ContactSms.settingsHTML():''}<div class="settings-title">데이터 관리</div><div class="settings-card">${settingsRow('backup','download','전체 데이터 백업','학생·출석 기록을 JSON 파일로 저장')}${settingsRow('import','upload','백업 파일 복원','저장해 둔 백업으로 현재 데이터를 교체')}${settingsRow('export-all','chart','전체 출석 기록 내보내기','엑셀에서 열 수 있는 CSV 파일로 저장')}</div><div class="white-card"><div class="row" style="color:#8873ad;margin-bottom:11px">${icon('shield')}<h3>이 기기에 안전하게 보관</h3></div><p class="modal-copy">학생 정보와 출석 기록은 이 기기에 저장돼요. 연락처 연동은 읽기 권한을, 학부모 문자는 SMS 권한과 문자 발송이 가능한 SIM을 사용해요. 다른 기기와 자동 동기화되지 않아요.</p><p class="hint">기기를 바꾸거나 앱을 삭제하기 전에 전체 데이터를 백업해 주세요.</p></div><p class="hint" style="text-align:center">오늘출석 1.2.1</p></section></div>`;
   }
   function modal(title, body, onSubmit) {
     lastFocus=document.activeElement;
     $('#modal-root').innerHTML=`<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" tabindex="-1"><div class="modal-header"><h2 id="modal-title">${e(title)}</h2><button class="icon-button" data-action="close" aria-label="닫기">${icon('close')}</button></div>${body}</section></div>`;
     document.body.style.overflow='hidden';
-    const form=$('#modal-root form');if(form&&onSubmit)form.addEventListener('submit',ev=>{ev.preventDefault();if(C.localDate()!==today){onResume();return;}onSubmit(new FormData(form),form);});
+    const form=$('#modal-root form');if(form&&onSubmit)form.addEventListener('submit',ev=>{ev.preventDefault();onResume();if(form.isConnected)onSubmit(new FormData(form),form);});
     $('.modal').focus();
   }
   function closeModal(){ if(window.ContactSms)window.ContactSms.onClose();$('#modal-root').innerHTML='';document.body.style.overflow='';if(lastFocus&&lastFocus.isConnected)lastFocus.focus();importData=null; }
-  function formError(message){const target=$('#form-error');if(target){target.textContent=message;target.classList.add('visible');}else toast(message);}
+  function formError(message){const target=$('#form-error');if(target){target.textContent=message;target.classList.add('visible');target.scrollIntoView({block:'nearest'});}else toast(message);}
   const errorSlot='<div id="form-error" class="form-error" role="alert"></div>';
   function confirmDialog(title,message,label,callback,danger=false){
     modal(title,`<p class="modal-copy">${e(message)}</p><div class="modal-actions"><button class="secondary" data-action="close">취소</button><button id="confirm-action" class="${danger?'danger-button':'primary'}">${e(label)}</button></div>`);
-    $('#confirm-action').addEventListener('click',()=>{closeModal();callback();});
+    const button=$('#confirm-action');button.addEventListener('click',()=>{onResume();if(!button.isConnected)return;closeModal();callback();});
   }
   function studentForm(id) {
     const old=state.students.find(s=>s.id===id),s=old||{name:'',memo:'',joinedDate:today};
@@ -133,10 +133,11 @@
   }
   function recordNote(id) {
     if(ui.date>today)return toast('미래 날짜에는 기록할 수 없어요.');
-    const s=state.students.find(x=>x.id===id),r=C.recordOf(state,id,ui.date);if(!s)return;
+    const date=ui.date,s=state.students.find(x=>x.id===id),r=C.recordOf(state,id,date);if(!s)return;
     modal('출석 메모',`<p class="modal-subtitle">${e(r?r.studentName:s.name)} · ${e(dateLong(ui.date))}</p><form><label class="field"><span>출석 상태</span><select name="status">${r?'':'<option value="" selected disabled>출결 상태를 선택해 주세요</option>'}${C.STATUSES.map(st=>`<option value="${st}" ${r&&r.status===st?'selected':''}>${C.LABELS[st]}</option>`).join('')}</select></label><label class="field"><span>메모</span><textarea name="note" maxlength="200" placeholder="예: 병원 진료, 10분 늦게 등원">${e(r?r.note:'')}</textarea></label>${errorSlot}<div class="modal-actions"><button type="button" class="secondary" data-action="close">취소</button><button type="submit" class="primary">메모 저장</button></div>${r?`<button type="button" class="text-button text-danger full" data-action="clear-record" data-id="${e(id)}">이날 기록을 미출석으로 되돌리기</button>`:''}</form>`,fd=>{
-      try { if(!C.STATUSES.includes(fd.get('status')))return formError('먼저 출결 상태를 선택해 주세요.');if(saveAttendance(C.mark(state,id,ui.date,fd.get('status'),String(fd.get('note')||'').trim()),'출석 메모를 저장했어요.'))closeModal(); } catch(error){formError(error.message);}
+      try { if(!C.STATUSES.includes(fd.get('status')))return formError('먼저 출결 상태를 선택해 주세요.');if(saveAttendance(C.mark(state,id,date,fd.get('status'),String(fd.get('note')||'').trim()),'출석 메모를 저장했어요.'))closeModal(); } catch(error){formError(error.message);}
     });
+    $('.modal').dataset.attendanceDate=date;
   }
   function academyForm(){modal('학원 정보',`<form><label class="field"><span>학원 이름</span><input name="academy" maxlength="40" required value="${e(state.settings.academy)}"></label><label class="field"><span>선생님 이름 <small style="display:inline">선택</small></span><input name="teacher" maxlength="30" value="${e(state.settings.teacher)}" placeholder="선생님 이름"></label>${errorSlot}<div class="modal-actions"><button type="button" class="secondary" data-action="close">취소</button><button type="submit" class="primary">저장</button></div></form>`,fd=>{const academy=String(fd.get('academy')||'').trim();if(!academy)return formError('학원 이름을 입력해 주세요.');const next=C.clone(state);next.settings={...next.settings,academy,teacher:String(fd.get('teacher')||'').trim()};if(save(next,'학원 정보를 저장했어요.'))closeModal();});}
   function exportFile(name,type,content){
@@ -171,12 +172,17 @@
     else if(a==='date-select')setDate(b.dataset.date);
     else if(a==='mark')markStudent(id,b.dataset.status);
     else if(a==='record-note')recordNote(id);
-    else if(a==='clear-record')confirmDialog('출석 기록을 지울까요?','이 날짜의 출석 상태와 메모가 지워지고 미출석으로 돌아가요.','미출석으로',()=>{try{save(C.mark(state,id,ui.date,'unmarked'),'기록을 미출석으로 되돌렸어요.',true);}catch(error){toast(error.message);}},true);
+    else if(a==='clear-record'){
+      const date=ui.date;
+      confirmDialog('출석 기록을 지울까요?','이 날짜의 출석 상태와 메모가 지워지고 미출석으로 돌아가요.','미출석으로',()=>{try{save(C.mark(state,id,date,'unmarked'),'기록을 미출석으로 되돌렸어요.',true);}catch(error){toast(error.message);}},true);
+      $('.modal').dataset.attendanceDate=date;
+    }
     else if(a==='undo'&&undoState){const previous=undoState;save(previous,'이전 상태로 되돌렸어요.');}
     else if(a==='bulk-present'){
       const rows=C.roster(state,ui.date,'all',false,ui.query).filter(row=>!row.record);if(!rows.length)return toast('현재 목록의 출석을 모두 확인했어요.');
       const date=ui.date;
       confirmDialog('한 번에 출석 처리할까요?',`${dateLong(date)}\n현재 검색 조건에 해당하는 미출석 학생 ${rows.length}명만 출석 처리해요.\n이미 체크한 학생의 상태는 유지돼요.${state.settings.sms.enabled?'\n문자 수신을 켠 학부모에게 출석 문자도 발송됩니다.':''}`,'출석 처리',()=>{try{const next=C.markUnmarkedPresent(state,rows.map(row=>row.student.id),date);saveAttendance(next,`${rows.length}명을 출석 처리했어요.`);}catch(error){toast(error.message);}});
+      $('.modal').dataset.attendanceDate=date;
     }
     else if(a==='student-archive'){
       const s=state.students.find(x=>x.id===id);if(!s)return;
@@ -226,13 +232,18 @@
     const now=C.localDate();
     if(now!==today){
       today=now;ui.date=now;ui.month=now.slice(0,7);ui.query='';undoState=null;
-      if($('.modal'))closeModal();
+      clearTimeout(toastTimer);$('#toast').innerHTML='';$('#toast').classList.remove('show');
+      if($('.modal[data-attendance-date]'))closeModal();
+      const joinedDate=$('#modal-root [name=joinedDate]');if(joinedDate)joinedDate.max=today;
       render();
-      toast('새 날짜가 시작되어 모든 학생이 미출석 상태로 표시돼요. 이전 기록은 보관됩니다.');
+      if(!loadError)toast('새 날짜가 시작되어 모든 학생이 미출석 상태로 표시돼요. 이전 기록은 보관됩니다.');
     }
+    if(window.ContactSms&&window.ContactSms.onResume)window.ContactSms.onResume();
     scheduleMidnight();
   }
   window.AttendanceApp={getState:()=>state,save,render,modal,closeModal,formError,toast,smsToast:message=>toast(message,!!undoState),confirmDialog,icon,escape:e,studentForm,onImport:handleImport,onNativeResult:message=>toast(message),onResume,handleBack:()=>{if(window.ContactSms&&window.ContactSms.handleBack())return true;if($('.modal')){closeModal();return true;}if(ui.tab!=='attendance'){ui.tab='attendance';render();return true;}return false;}};
-  document.addEventListener('visibilitychange',()=>{if(!document.hidden)onResume();});setInterval(onResume,60000);scheduleMidnight();
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)onResume();});
+  window.addEventListener('focus',onResume);window.addEventListener('pageshow',onResume);
+  setInterval(onResume,60000);scheduleMidnight();
   render();
 })();

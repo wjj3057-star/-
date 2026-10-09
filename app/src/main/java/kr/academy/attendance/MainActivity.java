@@ -150,7 +150,7 @@ public final class MainActivity extends Activity {
                     byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
                     if (bytes.length > MAX_BYTES) return envelope(false, "");
                     JSONObject value = new JSONObject(json);
-                    if (value.getInt("schema") != 2 || value.getJSONArray("students").length() > 5000 || value.getJSONArray("classes").length() > 200 || value.getJSONArray("records").length() > 100000) return envelope(false, "");
+                    if (value.getInt("schema") != 2 || value.getJSONArray("students").length() > 5000 || value.getJSONArray("classes").length() > 201 || value.getJSONArray("records").length() > 100000) return envelope(false, "");
                     value.getJSONObject("settings");
                     out = dataFile.startWrite(); out.write(bytes); dataFile.finishWrite(out);
                     return envelope(true, "");
@@ -180,8 +180,13 @@ public final class MainActivity extends Activity {
             });
         }
         @JavascriptInterface public String deviceInfo(){
-            try{return new JSONObject().put("contactsGranted",checkSelfPermission(Manifest.permission.READ_CONTACTS)==PackageManager.PERMISSION_GRANTED).put("smsGranted",checkSelfPermission(Manifest.permission.SEND_SMS)==PackageManager.PERMISSION_GRANTED).put("smsCapable",SmsOutbox.capable(MainActivity.this)).put("simReady",SmsOutbox.simReady()).toString();}
-            catch(Exception e){return "{\"contactsGranted\":false,\"smsGranted\":false,\"smsCapable\":false,\"simReady\":false}";}
+            // A missing SIM must never erase independently verified permission grants.
+            JSONObject info=new JSONObject();
+            try{info.put("contactsGranted",checkSelfPermission(Manifest.permission.READ_CONTACTS)==PackageManager.PERMISSION_GRANTED);}catch(Exception ignored){}
+            try{info.put("smsGranted",checkSelfPermission(Manifest.permission.SEND_SMS)==PackageManager.PERMISSION_GRANTED);}catch(Exception ignored){}
+            try{info.put("smsCapable",SmsOutbox.capable(MainActivity.this));}catch(Exception ignored){}
+            try{info.put("simReady",SmsOutbox.simReady());}catch(Exception ignored){}
+            return info.toString();
         }
         @JavascriptInterface public void loadContacts(String requestId){
             if(requestId==null||requestId.length()>80)return;

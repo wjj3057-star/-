@@ -35,6 +35,8 @@ jobs:
           node --check tests/contacts-sms.test.cjs
           node --check tests/ui.cjs
           node --check tests/contacts-ui.cjs
+          node --check tests/settings-ui.cjs
+          node --check tests/midnight-ui.cjs
       - name: Node unit tests
         run: node --test tests/core.test.cjs tests/contacts-sms.test.cjs
       - name: SMS rules Java unit tests
@@ -50,6 +52,8 @@ jobs:
         run: |
           node tests/ui.cjs
           node tests/contacts-ui.cjs
+          node tests/settings-ui.cjs
+          node tests/midnight-ui.cjs
       - name: Configure Android SDK
         uses: android-actions/setup-android@v4
       - name: Install Android SDK 35
@@ -62,6 +66,6 @@ jobs:
       - name: Publish test build
         uses: actions/upload-artifact@v4
         with:
-          name: academy-attendance-ci-unsigned-release-test-key
+          name: academy-attendance-ci-test-install-only
           path: out/AcademyAttendance.apk
           retention-days: 7

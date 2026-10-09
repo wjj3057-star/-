@@ -60,7 +60,7 @@
     const fail = () => { throw new Error('올바른 오늘출석 백업 파일이 아닙니다. 원래 데이터는 유지됩니다.'); };
     if (!value || value.schema !== 2 || !value.settings || !text(value.settings.academy, 40, true) || !text(value.settings.teacher, 30)) fail();
     const sms=value.settings.sms,kw=value.settings.contactKeywords;
-    if(!sms||typeof sms.enabled!=='boolean'||!Array.isArray(sms.statuses)||sms.statuses.length>4||!sms.statuses.length||new Set(sms.statuses).size!==sms.statuses.length||sms.statuses.some(s=>!STATUSES.includes(s))||!text(sms.template,500,true)||!kw)fail();
+    if(!sms||typeof sms.enabled!=='boolean'||!Array.isArray(sms.statuses)||sms.statuses.length>4||(sms.enabled&&!sms.statuses.length)||new Set(sms.statuses).size!==sms.statuses.length||sms.statuses.some(s=>!STATUSES.includes(s))||!text(sms.template,500,true)||!kw)fail();
     for(const role of Object.keys(DEFAULT_KEYWORDS))if(!Array.isArray(kw[role])||kw[role].length>20||!kw[role].length||kw[role].some(k=>!text(k,20,true)))fail();
     const allKeywords=Object.values(kw).flat().map(k=>k.trim());if(new Set(allKeywords).size!==allKeywords.length)fail();
     if (!Array.isArray(value.classes) || value.classes.length > 201 || !Array.isArray(value.students) || value.students.length > 5000 || !Array.isArray(value.records) || value.records.length > 100000) fail();

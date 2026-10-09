@@ -130,3 +130,6 @@ test('note-only edits do not create SMS events and daily rollover never resends 
   assert.equal(C.smsChanges(checked,edit,'2026-10-09').length,0);
   assert.equal(C.count(C.roster(edit,'2026-10-09')).unmarked,2);
 });
+
+test('disabled SMS can keep an empty status selection; enabling still needs a target',()=>{const s=C.fresh();s.settings.sms.statuses=[];assert.deepEqual(C.parseBackup(C.backup(s)).settings.sms.statuses,[]);s.settings.sms.enabled=true;assert.throws(()=>C.validate(s));});
+test('the largest legacy class list migrates without blocking later settings saves',()=>{const s=C.fresh();s.classes=Array.from({length:200},(_,i)=>({...C.fresh().classes[0],id:'legacy_'+i,name:'기존 반 '+i}));const migrated=C.validate(s);assert.equal(migrated.classes.length,201);migrated.settings.academy='변경한 학원';assert.equal(C.validate(migrated).settings.academy,'변경한 학원');});

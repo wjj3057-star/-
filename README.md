@@ -2,9 +2,18 @@
 
 학원 선생님이 **반 구분 없이 전체 학생의 출석을 관리**하고, 학부모에게 출석 SMS를 보낼 수 있는 Android 앱입니다.
 
-- 버전: **1.2.0** (`versionCode 3`)
+- 버전: **1.2.1** (`versionCode 4`)
 - 한국어 UI, Android 8.0 (API 26) 이상
 - 기기 내부 저장 방식으로 인터넷, 계정, 외부 서버 불필요
+
+## 1.2.1 수정 사항
+
+- 문자 권한이나 기본 SIM 설정 전에도 문구·발송 대상·자동 발송 사용 여부를 저장합니다. 실제 발송은 기기·권한·SIM이 준비된 뒤 새로 체크하는 출결부터 요청합니다. 준비되지 않은 동안의 출결을 나중에 자동 소급 발송하지 않습니다.
+- 문자 권한이 확인되면 권한 요청·앱 권한 설정 버튼을 숨깁니다. 시스템 설정에서 돌아오거나 권한이 취소되면 표시를 갱신하며, 작성 중인 문구는 유지합니다.
+- 연락처 권한을 허용하고 돌아오면 진행 중이던 연락처 선택·검색을 다시 불러옵니다.
+- 저장 실패 시 입력값을 유지하고 양식 안에 오류를 표시하여 재시도할 수 있습니다. 자동 발송을 끈 상태에서는 발송 대상 선택을 모두 해제해도 저장할 수 있습니다.
+- 이전 버전의 최대 반 개수(200개)를 가진 데이터도 새 내부 호환 항목을 포함해 정상 저장합니다.
+- 자정에 출석 메모·일괄 체크·기록 삭제 확인창은 종료하고, 설정·학생 등록에서 입력 중인 내용은 유지합니다. 지난 날짜의 확인 버튼이 다음 날짜에 출석을 변경하지 않도록 보호합니다.
 
 ## 출석 체크 및 자정 초기화
 
@@ -70,6 +79,8 @@ tests/contacts-sms.test.cjs 주소록·SMS 규칙 테스트
 tests/ui.cjs                브라우저 UI 및 날짜 전환 테스트
 tests/contacts-ui.cjs       연락처·SMS 화면 통합 테스트
 tests/SmsRulesTest.java     Java 휴대폰 번호와 SMS 규칙 테스트
+tests/settings-ui.cjs       설정 저장·재실행·권한 표시·실패 복구 테스트
+tests/midnight-ui.cjs       자정·정오·연말·절전 복귀 및 입력 보존 테스트
 ```
 
 WebView에는 번들 로컬 자산만 로드합니다. 외부 페이지 탐색은 차단하고, HTML 문자열은 이스케이프합니다. 출석 데이터는 앱 전용 디렉터리에 `AtomicFile`로 저장됩니다. 런타임 외부 라이브러리는 없습니다.
@@ -87,7 +98,7 @@ APK 출력: `out\AcademyAttendance.apk`
 
 Android Studio를 사용할 경우 Gradle 8.9 / Android Gradle Plugin 8.7.3으로 빌드할 수 있습니다.
 
-**업데이트 주의:** 기기에 설치된 기존 앱의 데이터를 유지하려면 이전 APK와 **동일한 서명 키**를 사용해야 합니다. 신규 설치용 임시 키와 기존 배포 키는 서로 교환할 수 없습니다. 원래 APK의 서명 키를 보관한 상태에서 `--keystore` 옵션으로 재사용하세요.
+**업데이트 주의:** 기기에 설치된 기존 앱의 데이터를 유지하려면 이전 APK와 **동일한 서명 키**를 사용해야 합니다. 신규 설치용 임시 키와 기존 배포 키는 서로 교환할 수 없습니다. GitHub Actions의 테스트 APK는 실행마다 새 임시 키로 서명되므로 기존 설치본 업데이트용으로 사용하지 마세요. 원래 APK의 서명 키를 보관한 상태에서 `--keystore` 옵션으로 재사용하세요.
 
 ```powershell
 python .\scripts\build_apk.py --keystore "C:\MyPrivateKeys\AcademyAttendance-signing.keystore"
@@ -111,6 +122,8 @@ npm install --no-save playwright
 npx playwright install chromium
 node .\tests\ui.cjs
 node .\tests\contacts-ui.cjs
+node .\tests\settings-ui.cjs
+node .\tests\midnight-ui.cjs
 ```
 
 실제 Android 기기에서의 연락처 권한, 통신사 SMS 발송, 배터리 절전 상황은 별도 실기기 검증이 필요합니다.
