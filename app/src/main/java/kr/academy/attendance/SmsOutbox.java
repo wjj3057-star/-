@@ -62,6 +62,9 @@ public final class SmsOutbox {
         String status=r.getString("status");v.put("상태","present".equals(status)?"출석":"late".equals(status)?"지각":"absent".equals(status)?"결석":"공결");
         return SmsRules.render(settings.getJSONObject("sms").getString("template"),v);
     }
+    // Only the latest status controls eligibility: note-only updates refresh updatedAt,
+    // but must not silently discard a valid attendance SMS queued just before the edit.
+    // Changes to a different status are still discarded as stale.
     public static JSONObject send(Context c,JSONObject state,JSONArray changes) throws Exception {
         JSONObject config=state.getJSONObject("settings").getJSONObject("sms");
         if(!config.optBoolean("enabled"))return new JSONObject().put("queued",0).put("skipped",changes.length()).put("failed",0);
@@ -69,7 +72,7 @@ public final class SmsOutbox {
         for(int i=0;i<changes.length();i++){
             JSONObject change=changes.getJSONObject(i);String id=change.getString("studentId"),date=change.getString("date"),status=change.getString("status");
             JSONObject s=student(state,id),r=record(state,id,date);
-            if(!today().equals(date)||s==null||!s.optBoolean("active")||r==null||!status.equals(r.getString("status"))||!change.getString("updatedAt").equals(r.getString("updatedAt"))||!contains(config.getJSONArray("statuses"),status)){skipped++;continue;}
+            if(!today().equals(date)||s==null||!s.optBoolean("active")||r==null||!status.equals(r.getString("status"))||!contains(config.getJSONArray("statuses"),status)){skipped++;continue;}
             Set<String> seen=new HashSet<>();JSONArray guardians=s.getJSONArray("guardians");
             for(int j=0;j<guardians.length();j++){
                 JSONObject g=guardians.getJSONObject(j);String phone=SmsRules.phone(g.optString("phone"));
