@@ -113,40 +113,29 @@
     modal(title,`<p class="modal-copy">${e(message)}</p><div class="modal-actions"><button class="secondary" data-action="close">취소</button><button id="confirm-action" class="${danger?'danger-button':'primary'}">${e(label)}</button></div>`);
     $('#confirm-action').addEventListener('click',()=>{closeModal();callback();});
   }
-  function classForm(id, after) {
-    const old=state.classes.find(c=>c.id===id),c=old||{name:'',days:[1,2,3,4,5],time:'16:00',color:colors[0]};
-    modal(old?'반 정보 수정':'새 반 만들기',`<form><label class="field"><span>반 이름</span><input name="name" required maxlength="30" value="${e(c.name)}" placeholder="예: 중등 수학 A반" autocomplete="off"></label><div class="field"><span>수업 요일</span><div class="weekday-select">${days.map((d,i)=>`<label><input type="checkbox" name="days" value="${i}" ${c.days.includes(i)?'checked':''}><span>${d}</span></label>`).join('')}</div></div><label class="field"><span>수업 시작 시간</span><input type="time" name="time" required value="${c.time}"></label><div class="field"><span>반 색상</span><div class="color-select">${colors.map(color=>`<label style="--class-color:${color}"><input type="radio" name="color" value="${color}" ${c.color===color?'checked':''} aria-label="${color}"><span></span></label>`).join('')}</div></div>${old?'<p class="hint">요일 변경은 미기록 날짜의 명단에도 적용돼요. 이미 저장한 출석 기록의 반 이름과 상태는 유지돼요.</p>':''}${errorSlot}<div class="modal-actions"><button type="button" class="secondary" data-action="close">취소</button><button type="submit" class="primary">${old?'변경 저장':'반 만들기'}</button></div>${old?`<button type="button" class="text-button text-danger full" data-action="class-archive" data-id="${e(id)}">${icon('archive')} 이 반 보관하기</button>`:''}</form>`,fd=>{
-      const name=String(fd.get('name')||'').trim(),selected=fd.getAll('days').map(Number),time=String(fd.get('time')||''),color=fd.get('color')||c.color;
-      if(!name)return formError('반 이름을 입력해 주세요.');if(!selected.length)return formError('수업 요일을 하나 이상 선택해 주세요.');
-      if(state.classes.some(x=>!x.archived&&x.id!==id&&x.name===name))return formError('같은 이름의 반이 이미 있어요.');
-      const next=C.clone(state),group={id:old?id:C.uid(),name,days:selected,time,color,archived:false};
-      if(old)next.classes[next.classes.findIndex(x=>x.id===id)]=group;else next.classes.push(group);
-      if(save(next,old?'반 정보를 수정했어요.':'새 반을 만들었어요.')){closeModal();if(after)after(group.id);}
-    });
-  }
-  function studentForm(id, selectedClass) {
-    const groups=state.classes.filter(c=>!c.archived);
-    if(!groups.length){classForm(null,group=>studentForm(id,group));return;}
-    const old=state.students.find(s=>s.id===id),s=old||{name:'',classId:selectedClass||((ui.studentClass!=='all'&&groups.some(c=>c.id===ui.studentClass))?ui.studentClass:groups[0].id),memo:'',joinedDate:today};
-    modal(old?'학생 정보 수정':'새 학생 등록',`<form><label class="field"><span>학생 이름</span><input name="name" required maxlength="30" value="${e(s.name)}" placeholder="학생 이름을 입력하세요" autocomplete="off"></label><label class="field"><span>소속 반</span><select name="classId" required>${groups.map(c=>`<option value="${e(c.id)}" ${s.classId===c.id?'selected':''}>${e(c.name)}</option>`).join('')}</select></label><label class="field"><span>등록일</span><input type="date" name="joinedDate" required min="2000-01-01" max="${today}" value="${s.joinedDate}"><small>등록일 이후의 출석부에 표시돼요. 지난 출석도 입력할 수 있어요.</small></label><label class="field"><span>학생 메모 <small style="display:inline">선택</small></span><textarea name="memo" maxlength="200" placeholder="수업 관련 참고사항을 적어 주세요">${e(s.memo)}</textarea></label>${window.ContactSms?window.ContactSms.fields(s):''}${old?'<p class="hint">이름이나 반을 바꿔도 이전에 저장한 출석 기록은 유지돼요.</p>':''}${errorSlot}<div class="modal-actions"><button type="button" class="secondary" data-action="close">취소</button><button class="primary" type="submit">${old?'변경 저장':'학생 등록'}</button></div></form>`,fd=>{
-      const name=String(fd.get('name')||'').trim(),classId=String(fd.get('classId')||''),joinedDate=String(fd.get('joinedDate')||''),memo=String(fd.get('memo')||'').trim();
+  function studentForm(id) {
+    const old=state.students.find(s=>s.id===id),s=old||{name:'',memo:'',joinedDate:today};
+    modal(old?'학생 정보 수정':'새 학생 등록',`<form><label class="field"><span>학생 이름</span><input name="name" required maxlength="30" value="${e(s.name)}" placeholder="학생 이름을 입력하세요" autocomplete="off"></label><label class="field"><span>등록일</span><input type="date" name="joinedDate" required min="2000-01-01" max="${today}" value="${s.joinedDate}"><small>등록일 이후의 출석부에 표시돼요. 지난 출석도 입력할 수 있어요.</small></label><label class="field"><span>학생 메모 <small style="display:inline">선택</small></span><textarea name="memo" maxlength="200" placeholder="수업 관련 참고사항을 적어 주세요">${e(s.memo)}</textarea></label>${window.ContactSms?window.ContactSms.fields(s):''}${errorSlot}<div class="modal-actions"><button type="button" class="secondary" data-action="close">취소</button><button class="primary" type="submit">${old?'변경 저장':'학생 등록'}</button></div></form>`,fd=>{
+      const name=String(fd.get('name')||'').trim(),joinedDate=String(fd.get('joinedDate')||''),memo=String(fd.get('memo')||'').trim();
       if(!name)return formError('학생 이름을 입력해 주세요.');if(!C.validDate(joinedDate)||joinedDate>today)return formError('등록일을 확인해 주세요.');
-      if(state.students.some(x=>x.active&&x.id!==id&&x.name===name&&x.classId===classId))return formError('이 반에 같은 이름의 학생이 있어요. 이름 뒤에 구분 표시를 넣어 주세요.');
+      if(state.students.some(x=>x.active&&x.id!==id&&x.name===name))return formError('같은 이름의 학생이 있어요. 이름 뒤에 구분 표시를 넣어 주세요.');
       let contact;try{contact=window.ContactSms?window.ContactSms.readFields($('#modal-root form')):{phone:'',contactId:'',guardians:[]};}catch(error){return formError(error.message);}
-      const next=C.clone(state);if(old)Object.assign(next.students.find(x=>x.id===id),{name,classId,memo,joinedDate,...contact});else next.students.push({id:C.uid(),name,classId,memo,joinedDate,active:true,archivedDate:null,...contact});
+      const next=C.clone(state);
+      if(old)Object.assign(next.students.find(x=>x.id===id),{name,classId:C.DEFAULT_CLASS_ID,memo,joinedDate,...contact});
+      else next.students.push({id:C.uid(),name,classId:C.DEFAULT_CLASS_ID,memo,joinedDate,active:true,archivedDate:null,...contact});
       if(save(next,old?'학생 정보를 수정했어요.':'학생을 등록했어요.'))closeModal();
     });
   }
   function studentDetail(id) {
     const s=state.students.find(x=>x.id===id);if(!s)return;
-    const c=C.classOf(state,s.classId),month=ui.tab==='reports'?ui.month:ui.date.slice(0,7);
-    const records=state.records.filter(r=>r.studentId===id&&r.date.startsWith(month+'-')&&(ui.tab!=='reports'||ui.reportClass==='all'||r.classId===ui.reportClass)).sort((a,b)=>b.date.localeCompare(a.date)),t=C.count(records.map(r=>({record:r})));
-    modal(s.name,`<p class="modal-subtitle">${e(c.name)} · ${e(s.joinedDate)} 등록${s.active?'':' · 보관 중'}</p>${s.memo?`<div class="notice">${e(s.memo)}</div>`:''}${window.ContactSms?window.ContactSms.details(s):''}<div class="detail-stats">${C.STATUSES.map(st=>`<div><b>${t[st]}</b>${C.LABELS[st]}</div>`).join('')}</div><p class="record-summary">${e(month.replace('-','년 '))}월 기록 ${records.length}건</p>${records.length?records.map(r=>`<div class="log-row"><div class="row between"><span class="log-date">${e(dateLong(r.date))}<br><small>${e(r.className)}${r.time?' · '+e(r.time):''}</small></span><button class="status-label ${r.status}" data-action="detail-date" data-date="${r.date}">${C.LABELS[r.status]} ${icon('right')}</button></div>${r.note?`<p class="log-note">${e(r.note)}</p>`:''}</div>`).join(''):'<p class="hint">이 달에는 저장된 출석 기록이 없어요.</p>'}<div class="modal-actions"><button class="secondary" data-action="student-edit" data-id="${e(id)}">${icon('edit')} 정보 수정</button><button class="${s.active?'danger-button':'primary'}" data-action="student-archive" data-id="${e(id)}">${s.active?'학생 보관':'보관 해제'}</button></div>`);
+    const month=ui.tab==='reports'?ui.month:ui.date.slice(0,7);
+    const records=state.records.filter(r=>r.studentId===id&&r.date.startsWith(month+'-')).sort((a,b)=>b.date.localeCompare(a.date)),t=C.count(records.map(r=>({record:r})));
+    modal(s.name,`<p class="modal-subtitle">${e(s.joinedDate)} 등록${s.active?'':' · 보관 중'}</p>${s.memo?`<div class="notice">${e(s.memo)}</div>`:''}${window.ContactSms?window.ContactSms.details(s):''}<div class="detail-stats">${C.STATUSES.map(st=>`<div><b>${t[st]}</b>${C.LABELS[st]}</div>`).join('')}</div><p class="record-summary">${e(month.replace('-','년 '))}월 기록 ${records.length}건</p>${records.length?records.map(r=>`<div class="log-row"><div class="row between"><span class="log-date">${e(dateLong(r.date))}${r.time?`<br><small>${e(r.time)}</small>`:''}</span><button class="status-label ${r.status}" data-action="detail-date" data-date="${r.date}">${C.LABELS[r.status]} ${icon('right')}</button></div>${r.note?`<p class="log-note">${e(r.note)}</p>`:''}</div>`).join(''):'<p class="hint">이 달에는 저장된 출석 기록이 없어요.</p>'}<div class="modal-actions"><button class="secondary" data-action="student-edit" data-id="${e(id)}">${icon('edit')} 정보 수정</button><button class="${s.active?'danger-button':'primary'}" data-action="student-archive" data-id="${e(id)}">${s.active?'학생 보관':'보관 해제'}</button></div>`);
   }
   function recordNote(id) {
     if(ui.date>today)return toast('미래 날짜에는 기록할 수 없어요.');
     const s=state.students.find(x=>x.id===id),r=C.recordOf(state,id,ui.date);if(!s)return;
-    modal('출석 메모',`<p class="modal-subtitle">${e(r?r.studentName:s.name)} · ${e(dateLong(ui.date))}</p><form><label class="field"><span>출석 상태</span><select name="status">${C.STATUSES.map(st=>`<option value="${st}" ${(r?r.status:'present')===st?'selected':''}>${C.LABELS[st]}</option>`).join('')}</select></label><label class="field"><span>메모</span><textarea name="note" maxlength="200" placeholder="예: 병원 진료, 10분 늦게 등원">${e(r?r.note:'')}</textarea></label>${errorSlot}<div class="modal-actions"><button type="button" class="secondary" data-action="close">취소</button><button type="submit" class="primary">메모 저장</button></div>${r?`<button type="button" class="text-button text-danger full" data-action="clear-record" data-id="${e(id)}">이날 기록을 미확인으로 되돌리기</button>`:''}</form>`,fd=>{
+    modal('출석 메모',`<p class="modal-subtitle">${e(r?r.studentName:s.name)} · ${e(dateLong(ui.date))}</p><form><label class="field"><span>출석 상태</span><select name="status">${C.STATUSES.map(st=>`<option value="${st}" ${(r?r.status:'present')===st?'selected':''}>${C.LABELS[st]}</option>`).join('')}</select></label><label class="field"><span>메모</span><textarea name="note" maxlength="200" placeholder="예: 병원 진료, 10분 늦게 등원">${e(r?r.note:'')}</textarea></label>${errorSlot}<div class="modal-actions"><button type="button" class="secondary" data-action="close">취소</button><button type="submit" class="primary">메모 저장</button></div>${r?`<button type="button" class="text-button text-danger full" data-action="clear-record" data-id="${e(id)}">이날 기록을 미출석으로 되돌리기</button>`:''}</form>`,fd=>{
       try { if(saveAttendance(C.mark(state,id,ui.date,fd.get('status'),String(fd.get('note')||'').trim()),'출석 메모를 저장했어요.'))closeModal(); } catch(error){formError(error.message);}
     });
   }
@@ -161,54 +150,48 @@
   function handleImport(raw){
     try {
       const next=C.parseBackup(raw);next.settings.sms.enabled=false;importData=next;
-      modal('백업을 복원할까요?',`<p class="modal-copy">${e(next.settings.academy)}\n학생 ${next.students.length}명 · 반 ${next.classes.length}개\n출석 기록 ${next.records.length}건\n\n현재 데이터를 이 백업으로 교체해요. 복원 전 현재 데이터의 백업을 권장해요. 문자 자동 발송은 꺼진 상태로 복원돼요.</p><label class="check-row"><input id="restore-consent" type="checkbox">현재 데이터가 교체되는 것을 확인했어요.</label><div class="modal-actions"><button class="secondary" data-action="close">취소</button><button class="primary" id="restore-confirm" disabled>복원하기</button></div>`);
+      modal('백업을 복원할까요?',`<p class="modal-copy">${e(next.settings.academy)}\n학생 ${next.students.length}명 \n출석 기록 ${next.records.length}건\n\n현재 데이터를 이 백업으로 교체해요. 복원 전 현재 데이터의 백업을 권장해요. 문자 자동 발송은 꺼진 상태로 복원돼요.</p><label class="check-row"><input id="restore-consent" type="checkbox">현재 데이터가 교체되는 것을 확인했어요.</label><div class="modal-actions"><button class="secondary" data-action="close">취소</button><button class="primary" id="restore-confirm" disabled>복원하기</button></div>`);
       $('#restore-consent').addEventListener('change',ev=>$('#restore-confirm').disabled=!ev.target.checked);
-      $('#restore-confirm').addEventListener('click',()=>{if(!$('#restore-consent').checked)return;const restored=importData;if(save(restored,'백업 데이터를 복원했어요.')){closeModal();ui.classId=ui.studentClass=ui.reportClass='all';render();}});
+      $('#restore-confirm').addEventListener('click',()=>{if(!$('#restore-consent').checked)return;const restored=importData;if(save(restored,'백업 데이터를 복원했어요.')){closeModal();render();}});
     }catch(error){toast(error.message);}
   }
-  function markStudent(id,status){try {const old=C.recordOf(state,id,ui.date);if(saveAttendance(C.mark(state,id,ui.date,status=== (old&&old.status)?'unmarked':status),status===(old&&old.status)?'미확인으로 되돌렸어요.':`${C.LABELS[status]}으로 저장했어요.`)){} }catch(error){toast(error.message);}}
+  function markStudent(id,status){try {const old=C.recordOf(state,id,ui.date);if(saveAttendance(C.mark(state,id,ui.date,status=== (old&&old.status)?'unmarked':status),status===(old&&old.status)?'미출석으로 되돌렸어요.':`${C.LABELS[status]}으로 저장했어요.`)){} }catch(error){toast(error.message);}}
   function setDate(date){if(!C.validDate(date))return;ui.date=date;ui.query='';render();}
   document.addEventListener('click',ev=>{
     const b=ev.target.closest('[data-action]');if(!b||b.disabled)return;
     const a=b.dataset.action,id=b.dataset.id;
     if(a==='tab'){ui.tab=b.dataset.tab;render();window.scrollTo(0,0);}
-    else if(a==='filter'){ui[b.dataset.field]=id;render();}
     else if(a==='close')closeModal();
     else if(a==='student-add')studentForm();
     else if(a==='student-edit')studentForm(id);
     else if(a==='student-detail')studentDetail(id);
-    else if(a==='class-add')classForm();
-    else if(a==='class-edit')classForm(id);
     else if(a==='academy-edit')academyForm();
     else if(a==='date-shift')setDate(C.shiftDate(ui.date,Number(b.dataset.amount)));
     else if(a==='today')setDate(today);
     else if(a==='date-select')setDate(b.dataset.date);
     else if(a==='mark')markStudent(id,b.dataset.status);
     else if(a==='record-note')recordNote(id);
-    else if(a==='clear-record')confirmDialog('출석 기록을 지울까요?','이 날짜의 출석 상태와 메모가 지워지고 미확인으로 돌아가요.','미확인으로',()=>{try{save(C.mark(state,id,ui.date,'unmarked'),'기록을 미확인으로 되돌렸어요.',true);}catch(error){toast(error.message);}},true);
+    else if(a==='clear-record')confirmDialog('출석 기록을 지울까요?','이 날짜의 출석 상태와 메모가 지워지고 미출석으로 돌아가요.','미출석으로',()=>{try{save(C.mark(state,id,ui.date,'unmarked'),'기록을 미출석으로 되돌렸어요.',true);}catch(error){toast(error.message);}},true);
     else if(a==='undo'&&undoState){const previous=undoState;save(previous,'이전 상태로 되돌렸어요.');}
     else if(a==='bulk-present'){
-      const rows=C.roster(state,ui.date,ui.classId,ui.scheduled,ui.query).filter(row=>!row.record);if(!rows.length)return toast('현재 목록의 출석을 모두 확인했어요.');
+      const rows=C.roster(state,ui.date,'all',false,ui.query).filter(row=>!row.record);if(!rows.length)return toast('현재 목록의 출석을 모두 확인했어요.');
       const date=ui.date;
-      confirmDialog('한 번에 출석 처리할까요?',`${dateLong(date)}\n현재 검색·반 조건에 해당하는 미확인 학생 ${rows.length}명만 출석 처리해요.\n이미 체크한 학생의 상태는 유지돼요.${state.settings.sms.enabled?'\n문자 수신을 켠 학부모에게 출석 문자도 발송됩니다.':''}`,'출석 처리',()=>{try{let next=state;rows.forEach(row=>{next=C.mark(next,row.student.id,date,'present');});saveAttendance(next,`${rows.length}명을 출석 처리했어요.`);}catch(error){toast(error.message);}});
+      confirmDialog('한 번에 출석 처리할까요?',`${dateLong(date)}\n현재 검색 조건에 해당하는 미출석 학생 ${rows.length}명만 출석 처리해요.\n이미 체크한 학생의 상태는 유지돼요.${state.settings.sms.enabled?'\n문자 수신을 켠 학부모에게 출석 문자도 발송됩니다.':''}`,'출석 처리',()=>{try{let next=state;rows.forEach(row=>{next=C.mark(next,row.student.id,date,'present');});saveAttendance(next,`${rows.length}명을 출석 처리했어요.`);}catch(error){toast(error.message);}});
     }
     else if(a==='student-archive'){
       const s=state.students.find(x=>x.id===id);if(!s)return;
-      if(!s.active&&C.classOf(state,s.classId).archived)return toast('먼저 소속 반의 보관을 해제하거나 학생의 반을 바꿔 주세요.');
-      confirmDialog(s.active?'학생을 보관할까요?':'보관을 해제할까요?',s.active?`${s.name} 학생을 오늘부터 출석 명단에서 제외해요.\n이미 저장한 출석 기록은 계속 조회할 수 있어요.`:`${s.name} 학생을 다시 출석 명단에 표시해요.`,s.active?'보관하기':'보관 해제',()=>{const next=C.clone(state),target=next.students.find(x=>x.id===id);target.active=!target.active;target.archivedDate=target.active?null:today;save(next,target.active?'학생 보관을 해제했어요.':'학생을 보관했어요.',true);},s.active);
+      confirmDialog(s.active?'학생을 보관할까요?':'보관을 해제할까요?',s.active?`${s.name} 학생을 오늘부터 출석 명단에서 제외해요.\n이미 저장한 출석 기록은 계속 조회할 수 있어요.`:`${s.name} 학생을 다시 출석 명단에 표시해요.`,s.active?'보관하기':'보관 해제',()=>{
+        const next=C.clone(state),target=next.students.find(x=>x.id===id);
+        target.active=!target.active;target.archivedDate=target.active?null:today;
+        save(next,target.active?'학생 보관을 해제했어요.':'학생을 보관했어요.',true);
+      },s.active);
     }
-    else if(a==='class-archive'){
-      if(state.students.some(s=>s.active&&s.classId===id))return formError('소속 학생을 다른 반으로 옮기거나 보관한 뒤 반을 보관해 주세요.');
-      confirmDialog('이 반을 보관할까요?','저장된 출석 기록은 유지돼요. 보관된 반은 새 학생의 소속 반에서 제외돼요.','반 보관',()=>{const next=C.clone(state);next.classes.find(c=>c.id===id).archived=true;ui.classId=ui.studentClass='all';save(next,'반을 보관했어요.');},true);
-    }
-    else if(a==='archived-classes'){modal('보관된 반',state.classes.filter(c=>c.archived).map(c=>`<button class="settings-row" data-action="class-restore" data-id="${e(c.id)}"><span class="settings-label"><b>${e(c.name)}</b><small>눌러서 보관 해제</small></span>${icon('right')}</button>`).join(''));}
-    else if(a==='class-restore'){const next=C.clone(state),group=next.classes.find(c=>c.id===id);if(next.classes.some(c=>!c.archived&&c.name===group.name))return toast('같은 이름의 반이 있어요. 기존 반 이름을 먼저 수정해 주세요.');group.archived=false;if(save(next,'반 보관을 해제했어요.'))closeModal();}
-    else if(a==='calendar-date'||a==='detail-date'){closeModal();ui.classId=ui.reportClass;ui.tab='attendance';setDate(b.dataset.date);window.scrollTo(0,0);}
+    else if(a==='calendar-date'||a==='detail-date'){closeModal();ui.tab='attendance';setDate(b.dataset.date);window.scrollTo(0,0);}
     else if(a==='month-shift'){const d=new Date(ui.month+'-01T12:00:00');d.setMonth(d.getMonth()+Number(b.dataset.amount));const date=C.localDate(d);if(C.validDate(date)){ui.month=date.slice(0,7);render();}}
     else if(a==='this-month'){ui.month=today.slice(0,7);render();}
     else if(a==='backup')exportFile(`오늘출석_백업_${today}.json`,'application/json',C.backup(state));
     else if(a==='export-all')exportFile(`오늘출석_전체기록_${today}.csv`,'text/csv',C.csv(state.records));
-    else if(a==='export-month')exportFile(`오늘출석_${ui.month}_${ui.reportClass==='all'?'전체':C.classOf(state,ui.reportClass).name}.csv`,'text/csv',C.csv(C.report(state,ui.month,ui.reportClass).records));
+    else if(a==='export-month')exportFile(`오늘출석_${ui.month}_전체.csv`,'text/csv',C.csv(C.report(state,ui.month).records));
     else if(a==='import')requestImport();
     else if(a==='reload'){try{state=readState();loadError='';}catch(error){loadError=error.message;}render();}
   });
@@ -218,8 +201,7 @@
   });
   document.addEventListener('change',ev=>{
     if(ev.target.id==='attendance-date')setDate(ev.target.value);
-    else if(ev.target.id==='scheduled-toggle'){ui.scheduled=ev.target.checked;render();}
-    else if(ev.target.id==='archived-toggle'){ui.showArchived=ev.target.checked;if(!ui.showArchived)ui.studentClass='all';render();}
+    else if(ev.target.id==='archived-toggle'){ui.showArchived=ev.target.checked;render();}
     else if(ev.target.id==='report-month'){if(C.validDate(ev.target.value+'-01')){ui.month=ev.target.value;render();}}
     else if(ev.target.id==='import-file'&&ev.target.files[0]){const file=ev.target.files[0];if(file.size>24*1024*1024)return toast('백업 파일은 24MB 이하만 복원할 수 있어요.');file.text().then(handleImport).catch(()=>toast('파일을 읽지 못했어요.'));}
   });
@@ -232,8 +214,25 @@
       else if(!ev.shiftKey&&document.activeElement===last){ev.preventDefault();first.focus();}
     }
   });
-  function onResume(){const now=C.localDate();if(now!==today){if(ui.date===today)ui.date=now;if(ui.month===today.slice(0,7))ui.month=now.slice(0,7);today=now;if(!$('.modal'))render();}}
-  window.AttendanceApp={getState:()=>state,save,render,modal,closeModal,formError,toast,smsToast:message=>toast(message,!!undoState),confirmDialog,icon,escape:e,classForm,studentForm,onImport:handleImport,onNativeResult:message=>toast(message),onResume,handleBack:()=>{if(window.ContactSms&&window.ContactSms.handleBack())return true;if($('.modal')){closeModal();return true;}if(ui.tab!=='attendance'){ui.tab='attendance';render();return true;}return false;}};
-  document.addEventListener('visibilitychange',()=>{if(!document.hidden)onResume();});setInterval(onResume,60000);
+  // Midnight opens a fresh daily roster. Date-keyed history stays intact.
+  // Resume and polling compensate for timers paused while Android is asleep.
+  let midnightTimer=null;
+  function scheduleMidnight(){
+    clearTimeout(midnightTimer);
+    const now=new Date(),next=new Date(now.getFullYear(),now.getMonth(),now.getDate()+1);
+    midnightTimer=setTimeout(onResume,Math.max(1,next.getTime()-now.getTime()+30));
+  }
+  function onResume(){
+    const now=C.localDate();
+    if(now!==today){
+      today=now;ui.date=now;ui.month=now.slice(0,7);ui.query='';undoState=null;
+      if($('.modal'))closeModal();
+      render();
+      toast('새 날짜가 시작되어 모든 학생이 미출석 상태로 표시돼요. 이전 기록은 보관됩니다.');
+    }
+    scheduleMidnight();
+  }
+  window.AttendanceApp={getState:()=>state,save,render,modal,closeModal,formError,toast,smsToast:message=>toast(message,!!undoState),confirmDialog,icon,escape:e,studentForm,onImport:handleImport,onNativeResult:message=>toast(message),onResume,handleBack:()=>{if(window.ContactSms&&window.ContactSms.handleBack())return true;if($('.modal')){closeModal();return true;}if(ui.tab!=='attendance'){ui.tab='attendance';render();return true;}return false;}};
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)onResume();});setInterval(onResume,60000);scheduleMidnight();
   render();
 })();
