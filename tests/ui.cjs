@@ -28,8 +28,7 @@ async function main(){
   const read=()=>page.evaluate(()=>JSON.parse(localStorage.getItem('oneul-attendance-v1')));
   await page.goto(url);await page.getByRole('heading',{name:'출석 체크',exact:true}).waitFor();
   await page.getByRole('button',{name:'학생 등록하기',exact:true}).click();
-  await page.locator('[name=name]').fill('중등 수학 A반');
-  await page.getByRole('button',{name:'반 만들기',exact:true}).click();
+  assert.equal(await page.locator('[name=classId]').count(),0);
   await page.locator('[name=name]').fill('김하늘');
   await page.getByRole('button',{name:'학생 등록',exact:true}).click();
   await page.locator('.student-card').first().waitFor();
@@ -63,12 +62,28 @@ async function main(){
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth+1),false,`${tab} overflows at ${width}px`);
     }
   }
+  // Simulate the 00:00 date rollover: records remain, today's roster becomes unchecked.
+  const rolloverContext=await browser.newContext({viewport:{width:390,height:844},locale:'ko-KR',timezoneId:'Asia/Seoul'});
+  await rolloverContext.addInitScript(s=>localStorage.setItem('oneul-attendance-v1',s),JSON.stringify(C.parseBackup(backupRaw)));
+  const rolloverPage=await rolloverContext.newPage();
+  await rolloverPage.clock.install({time:new Date('2026-10-08T14:59:30Z')});
+  await rolloverPage.goto(url);
+  assert.equal(await rolloverPage.locator('.status-button.selected').count(),2);
+  await rolloverPage.clock.setFixedTime(new Date('2026-10-08T15:00:01Z'));
+  await rolloverPage.evaluate(()=>window.AttendanceApp.onResume());
+  assert.equal(await rolloverPage.locator('#attendance-date').inputValue(),'2026-10-09');
+  assert.equal(await rolloverPage.locator('.student-card').count(),2);
+  assert.equal(await rolloverPage.locator('.status-button.selected').count(),0);
+  const rolloverState=await rolloverPage.evaluate(()=>JSON.parse(localStorage.getItem('oneul-attendance-v1')));
+  assert.equal(rolloverState.records.length,2);
+  assert.equal(C.count(C.roster(C.validate(rolloverState),'2026-10-09')).unmarked,2);
+  await rolloverContext.close();
   // A native persistence failure must leave the previous attendance unchanged.
   const nativePage=await context.newPage();const nativeFixture=C.parseBackup(backupRaw);await nativePage.addInitScript(s=>{window.NativeAttendance={readState:()=>JSON.stringify({ok:true,data:JSON.stringify(s)}),saveState:()=>JSON.stringify({ok:false})};},nativeFixture);await nativePage.clock.install({time:new Date('2026-10-08T07:30:00Z')});await nativePage.goto(url);await nativePage.locator('[data-action=mark][data-status=absent]').first().click();await nativePage.getByText('저장에 실패했습니다. 기기의 저장 공간을 확인해 주세요.',{exact:true}).waitFor();assert.equal(await nativePage.locator('.status-button.absent.selected').count(),0);await nativePage.close();
   // A malformed saved file is not silently replaced by an empty dataset.
   const corrupt=await context.newPage();await corrupt.addInitScript(()=>localStorage.setItem('oneul-attendance-v1','{invalid'));await corrupt.goto(url);await corrupt.getByRole('heading',{name:'데이터를 확인해 주세요'}).waitFor();assert.equal(await corrupt.evaluate(()=>localStorage.getItem('oneul-attendance-v1')),'{invalid');await corrupt.close();
   assert.deepEqual(failures,[]);
-  console.log('UI passed: class/student registration, status, reload, notes, bulk/undo, search, reports, CSV, backup/restore, archive history, future-date protection, XSS, 3 widths, storage failures.');
+  console.log('UI passed: classless student registration, status, midnight rollover, reload, notes, bulk/undo, search, reports, CSV, backup/restore, archive history, future-date protection, XSS, 3 widths, storage failures.');
   if(process.env.QA_SCREENSHOT_DIR){
     const screenshotContext=await browser.newContext({viewport:{width:390,height:844},locale:'ko-KR',timezoneId:'Asia/Seoul',bypassCSP:true});const p=await screenshotContext.newPage();await p.clock.install({time:new Date('2026-10-08T07:30:00Z')});await p.addInitScript(s=>localStorage.setItem('oneul-attendance-v1',s),JSON.stringify(C.parseBackup(backupRaw)));await p.goto(url);
     if(process.env.QA_FONT_DIR){await p.addStyleTag({url:url+'/qa-font/400.css'});await p.addStyleTag({url:url+'/qa-font/700.css'});await p.evaluate(()=>document.fonts.ready);}
