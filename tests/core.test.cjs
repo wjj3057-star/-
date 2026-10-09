@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const C = require('../app/src/main/assets/core.js');
 function fixture() {
   const state=C.fresh();state.classes=[{id:'a',name:'수학반',days:[1,2,3,4,5],time:'16:00',color:'#8974C9',archived:false},{id:'b',name:'영어반',days:[6],time:'11:00',color:'#529E99',archived:false}];
-  state.students=[{id:'s1',name:'김하늘',classId:'a',memo:'',active:true,joinedDate:'2026-10-01',archivedDate:null},{id:'s2',name:'박지우',classId:'b',memo:'',active:true,joinedDate:'2026-10-01',archivedDate:null}];return state;
+  state.students=[{id:'s1',name:'김하늘',classId:'a',memo:'',phone:'',contactId:'',guardians:[],active:true,joinedDate:'2026-10-01',archivedDate:null},{id:'s2',name:'박지우',classId:'b',memo:'',phone:'',contactId:'',guardians:[],active:true,joinedDate:'2026-10-01',archivedDate:null}];return state;
 }
 const now=new Date('2026-10-08T16:17:00');
 test('local date boundaries and invalid dates',()=>{assert.equal(C.validDate('2026-02-30'),false);assert.equal(C.validDate('2024-02-29'),true);assert.equal(C.shiftDate('2026-12-31',1),'2027-01-01');assert.equal(C.localDate(new Date(2026,0,1,0,5)),'2026-01-01');});

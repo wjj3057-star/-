@@ -1,11 +1,16 @@
 package kr.academy.attendance;
 
 import android.app.Activity;
+import android.Manifest;
 import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.database.Cursor;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.provider.ContactsContract;
+import android.provider.Settings;
 import android.util.AtomicFile;
 import android.view.View;
 import android.view.WindowInsets;
@@ -19,6 +24,7 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
 import org.json.JSONObject;
+import org.json.JSONArray;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -33,17 +39,18 @@ import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-/** Offline-only shell. The bridge is reachable only from bundled, allowlisted assets. */
+/** Local-only app shell; optional contacts and carrier SMS use Android permissions. */
 public final class MainActivity extends Activity {
     private static final String ORIGIN = "https://appassets.androidplatform.net";
-    private static final int EXPORT = 100, IMPORT = 101, MAX_BYTES = 24 * 1024 * 1024;
-    private final Set<String> assets = new HashSet<>(Arrays.asList("/index.html", "/styles.css", "/core.js", "/app.js"));
+    private static final int EXPORT = 100, IMPORT = 101, CONTACT_PERMISSION = 110, SMS_PERMISSION = 111, MAX_BYTES = 24 * 1024 * 1024;
+    private final Set<String> assets = new HashSet<>(Arrays.asList("/index.html", "/styles.css", "/core.js", "/app.js", "/contacts-sms.js"));
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private final Object stateLock = new Object();
     private WebView webView;
     private AtomicFile dataFile;
     private byte[] pendingExport;
     private boolean pickerOpen;
+    private String pendingContactRequest="";
 
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -138,7 +145,7 @@ public final class MainActivity extends Activity {
                     byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
                     if (bytes.length > MAX_BYTES) return envelope(false, "");
                     JSONObject value = new JSONObject(json);
-                    if (value.getInt("schema") != 1 || value.getJSONArray("students").length() > 5000 || value.getJSONArray("classes").length() > 200 || value.getJSONArray("records").length() > 100000) return envelope(false, "");
+                    if (value.getInt("schema") != 2 || value.getJSONArray("students").length() > 5000 || value.getJSONArray("classes").length() > 200 || value.getJSONArray("records").length() > 100000) return envelope(false, "");
                     value.getJSONObject("settings");
                     out = dataFile.startWrite(); out.write(bytes); dataFile.finishWrite(out);
                     return envelope(true, "");
@@ -167,6 +174,67 @@ public final class MainActivity extends Activity {
                 catch (Exception error) { pickerOpen = false; notifyResult("파일 선택 앱을 열 수 없어요."); }
             });
         }
+        @JavascriptInterface public String deviceInfo(){
+            try{return new JSONObject().put("contactsGranted",checkSelfPermission(Manifest.permission.READ_CONTACTS)==PackageManager.PERMISSION_GRANTED).put("smsGranted",checkSelfPermission(Manifest.permission.SEND_SMS)==PackageManager.PERMISSION_GRANTED).put("smsCapable",SmsOutbox.capable(MainActivity.this)).put("simReady",SmsOutbox.simReady()).toString();}
+            catch(Exception e){return "{\"contactsGranted\":false,\"smsGranted\":false,\"smsCapable\":false,\"simReady\":false}";}
+        }
+        @JavascriptInterface public void loadContacts(String requestId){
+            if(requestId==null||requestId.length()>80)return;
+            runOnUiThread(()->{
+                pendingContactRequest=requestId;
+                if(checkSelfPermission(Manifest.permission.READ_CONTACTS)==PackageManager.PERMISSION_GRANTED)queryContacts(requestId);
+                else requestPermissions(new String[]{Manifest.permission.READ_CONTACTS},CONTACT_PERMISSION);
+            });
+        }
+        @JavascriptInterface public void requestSmsPermission(){runOnUiThread(()->{
+            if(checkSelfPermission(Manifest.permission.SEND_SMS)==PackageManager.PERMISSION_GRANTED)permissionResult();
+            else requestPermissions(new String[]{Manifest.permission.SEND_SMS},SMS_PERMISSION);
+        });}
+        @JavascriptInterface public void openAppSettings(){runOnUiThread(()->startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,Uri.parse("package:"+getPackageName()))));}
+        @JavascriptInterface public void sendAttendanceSms(String raw){
+            if(raw==null||raw.length()>2*1024*1024)return;
+            io.execute(()->{try{
+                JSONArray changes=new JSONArray(raw);if(changes.length()>5000)throw new Exception("한 번에 처리할 학생이 너무 많아요.");
+                JSONObject snapshot=readSnapshot();JSONObject result=SmsOutbox.send(getApplicationContext(),snapshot,changes);result.put("ok",true);addon("onSmsQueue",result);
+            }catch(Exception e){addonError("onSmsQueue",e.getMessage()==null?"문자 요청을 처리하지 못했어요.":e.getMessage());}});
+        }
+        @JavascriptInterface public String smsLogs(){try{return SmsOutbox.logs(MainActivity.this).toString();}catch(Exception e){return "{\"ok\":false,\"error\":\"문자 기록을 읽지 못했어요. 중복 방지를 위해 자동 발송을 중단합니다.\"}";}}
+        @JavascriptInterface public void retrySms(String id){
+            if(id==null||id.length()>80)return;
+            io.execute(()->{try{SmsOutbox.retry(getApplicationContext(),readSnapshot(),id);addon("onSmsQueue",new JSONObject().put("ok",true).put("message","재전송을 요청했어요. 문자 발송 기록에서 결과를 확인해 주세요."));}catch(Exception e){addonError("onSmsQueue",e.getMessage());}});
+        }
+    }
+    private JSONObject readSnapshot() throws Exception {synchronized(stateLock){return new JSONObject(new String(readLimited(dataFile.openRead()),StandardCharsets.UTF_8));}}
+    private void addon(String method,JSONObject value){runOnUiThread(()->{if(!isFinishing()&&webView!=null)webView.evaluateJavascript("window.ContactSms&&window.ContactSms."+method+"("+value.toString()+")",null);});}
+    private void addonError(String method,String error){try{addon(method,new JSONObject().put("ok",false).put("error",error==null?"요청을 처리하지 못했어요.":error));}catch(Exception ignored){}}
+    private void permissionResult(){try{addon("onPermission",new JSONObject(new Bridge().deviceInfo()));}catch(Exception ignored){}}
+    private void queryContacts(String requestId){
+        io.execute(()->{
+            JSONObject result=new JSONObject();
+            try{
+                result.put("requestId",requestId);JSONArray contacts=new JSONArray();boolean truncated=false;
+                String[] projection={ContactsContract.CommonDataKinds.Phone._ID,ContactsContract.CommonDataKinds.Phone.CONTACT_ID,ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,ContactsContract.CommonDataKinds.Phone.NUMBER};
+                try(Cursor cursor=getContentResolver().query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI,projection,null,null,ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME+" ASC")){
+                    if(cursor==null)throw new Exception("연락처를 읽을 수 없어요.");
+                    Set<String> seen=new HashSet<>();
+                    while(cursor.moveToNext()){
+                        if(contacts.length()>=20000){truncated=true;break;}
+                        String phone=SmsRules.phone(cursor.getString(3)),name=cursor.getString(2);if(phone.isEmpty()||name==null||name.trim().isEmpty())continue;
+                        String key=cursor.getString(1)+"|"+phone;if(!seen.add(key))continue;
+                        contacts.put(new JSONObject().put("id",cursor.getString(1)+"_"+cursor.getString(0)).put("name",name.length()>80?name.substring(0,80):name).put("phone",phone));
+                    }
+                }
+                result.put("ok",true).put("contacts",contacts).put("truncated",truncated);
+            }catch(Exception e){try{result.put("ok",false).put("error","연락처 권한을 허용했는지 확인해 주세요.");}catch(Exception ignored){}}
+            addon("onContacts",result);
+        });
+    }
+    @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] grants){
+        super.onRequestPermissionsResult(request,permissions,grants);
+        if(request==CONTACT_PERMISSION){
+            if(checkSelfPermission(Manifest.permission.READ_CONTACTS)==PackageManager.PERMISSION_GRANTED)queryContacts(pendingContactRequest);
+            else {try{addon("onContacts",new JSONObject().put("requestId",pendingContactRequest).put("ok",false).put("error","연락처 권한이 거부됐어요. 연락처를 직접 입력하거나 앱 설정에서 권한을 허용해 주세요."));}catch(Exception ignored){}}
+        }else if(request==SMS_PERMISSION)permissionResult();
     }
     private void notifyResult(String message) {
         runOnUiThread(() -> { if (!isFinishing() && webView != null) webView.evaluateJavascript("window.AttendanceApp&&window.AttendanceApp.onNativeResult(" + JSONObject.quote(message) + ")", null); });

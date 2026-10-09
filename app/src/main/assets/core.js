@@ -24,13 +24,34 @@
     }
     return 'id_' + Date.now().toString(36) + Math.random().toString(36).slice(2);
   }
-  function fresh() { return {schema: 1, settings: {academy: '우리 학원', teacher: ''}, classes: [], students: [], records: []}; }
+  const DEFAULT_TEMPLATE = '[{학원명}] {학생이름} 학생이 {날짜} {시간}에 {상태} 처리되었습니다.';
+  const DEFAULT_KEYWORDS = {mother:['어머니','어머님','엄마','모친'],father:['아버지','아버님','아빠','부친'],guardian:['보호자'],student:['학생']};
+  const TOKENS = ['학원명','학생이름','반이름','날짜','시간','상태','선생님','메모'];
+  function fresh() { return {schema: 2, settings: {academy: '우리 학원', teacher: '',sms:{enabled:false,statuses:['present','late'],template:DEFAULT_TEMPLATE},contactKeywords:clone(DEFAULT_KEYWORDS)}, classes: [], students: [], records: []}; }
+  function normalizePhone(value) {
+    if (typeof value !== 'string' || !/^[+\d\s().-]*$/.test(value)) return '';
+    let n=value.replace(/[\s().-]/g,'');
+    if(n.startsWith('+82'))n='0'+n.slice(3).replace(/^0/,'');
+    return /^\+?[0-9]{8,15}$/.test(n)?n:'';
+  }
+  function upgrade(value) {
+    if(!value || value.schema!==1)return value;
+    const next=clone(value);next.schema=2;
+    next.settings={...next.settings,sms:fresh().settings.sms,contactKeywords:clone(DEFAULT_KEYWORDS)};
+    if(Array.isArray(next.students))next.students=next.students.map(s=>({...s,phone:'',contactId:'',guardians:[]}));
+    return next;
+  }
   function text(value, max, required = false) {
     return typeof value === 'string' && value.length <= max && (!required || value.trim().length > 0);
   }
   function validate(value) {
+    value=upgrade(value);
     const fail = () => { throw new Error('올바른 오늘출석 백업 파일이 아닙니다. 원래 데이터는 유지됩니다.'); };
-    if (!value || value.schema !== 1 || !value.settings || !text(value.settings.academy, 40, true) || !text(value.settings.teacher, 30)) fail();
+    if (!value || value.schema !== 2 || !value.settings || !text(value.settings.academy, 40, true) || !text(value.settings.teacher, 30)) fail();
+    const sms=value.settings.sms,kw=value.settings.contactKeywords;
+    if(!sms||typeof sms.enabled!=='boolean'||!Array.isArray(sms.statuses)||sms.statuses.length>4||!sms.statuses.length||new Set(sms.statuses).size!==sms.statuses.length||sms.statuses.some(s=>!STATUSES.includes(s))||!text(sms.template,500,true)||!kw)fail();
+    for(const role of Object.keys(DEFAULT_KEYWORDS))if(!Array.isArray(kw[role])||kw[role].length>20||!kw[role].length||kw[role].some(k=>!text(k,20,true)))fail();
+    const allKeywords=Object.values(kw).flat().map(k=>k.trim());if(new Set(allKeywords).size!==allKeywords.length)fail();
     if (!Array.isArray(value.classes) || value.classes.length > 200 || !Array.isArray(value.students) || value.students.length > 5000 || !Array.isArray(value.records) || value.records.length > 100000) fail();
     const ids = new Set(), studentIds = new Set(), keys = new Set();
     const idOK = x => typeof x === 'string' && /^[a-zA-Z0-9_-]{1,80}$/.test(x);
@@ -41,6 +62,9 @@
     for (const s of value.students) {
       if (!s || !idOK(s.id) || studentIds.has(s.id) || !text(s.name, 30, true) || !ids.has(s.classId) || !text(s.memo, 200) || typeof s.active !== 'boolean' || !validDate(s.joinedDate) || !(s.archivedDate === null || validDate(s.archivedDate))) fail();
       studentIds.add(s.id);
+      if(!text(s.phone,30)||s.phone&&!normalizePhone(s.phone)||!text(s.contactId,100)||!Array.isArray(s.guardians)||s.guardians.length>6)fail();
+      const phones=new Set(),guardianIds=new Set();
+      for(const g of s.guardians){const phone=g&&normalizePhone(g.phone);if(!g||!idOK(g.id)||guardianIds.has(g.id)||!text(g.name,80,true)||!['mother','father','guardian'].includes(g.relation)||!phone||phones.has(phone)||typeof g.notify!=='boolean'||!text(g.contactId,100))fail();phones.add(phone);guardianIds.add(g.id);}
     }
     for (const r of value.records) {
       const key = r && `${r.date}|${r.studentId}`;
@@ -48,9 +72,9 @@
       keys.add(key);
     }
     // Copy only known fields: never import prototypes, transient UI state or unrecognized settings.
-    return {schema: 1, settings: {academy: value.settings.academy.trim(), teacher: value.settings.teacher.trim()},
+    return {schema: 2, settings: {academy: value.settings.academy.trim(), teacher: value.settings.teacher.trim(),sms:{enabled:sms.enabled,statuses:[...sms.statuses],template:sms.template},contactKeywords:Object.fromEntries(Object.keys(DEFAULT_KEYWORDS).map(k=>[k,kw[k].map(v=>v.trim())]))},
       classes: value.classes.map(c => ({id:c.id,name:c.name.trim(),color:c.color,days:[...c.days],time:c.time,archived:c.archived})),
-      students: value.students.map(s => ({id:s.id,name:s.name.trim(),classId:s.classId,memo:s.memo,active:s.active,joinedDate:s.joinedDate,archivedDate:s.archivedDate})),
+      students: value.students.map(s => ({id:s.id,name:s.name.trim(),classId:s.classId,memo:s.memo,active:s.active,joinedDate:s.joinedDate,archivedDate:s.archivedDate,phone:normalizePhone(s.phone),contactId:s.contactId,guardians:s.guardians.map(g=>({id:g.id,name:g.name.trim(),relation:g.relation,phone:normalizePhone(g.phone),notify:g.notify,contactId:g.contactId}))})),
       records: value.records.map(r => ({studentId:r.studentId,classId:r.classId,date:r.date,status:r.status,note:r.note,studentName:r.studentName,className:r.className,time:r.time,updatedAt:r.updatedAt}))};
   }
   function classOf(state, id) { return state.classes.find(c => c.id === id); }
@@ -110,5 +134,54 @@
     if (!value || value.app !== '오늘출석' || !value.data) throw new Error('오늘출석에서 만든 JSON 백업 파일을 선택해 주세요.');
     return validate(value.data);
   }
-  return {STATUSES,LABELS,clone,localDate,validDate,shiftDate,uid,fresh,validate,classOf,recordOf,roster,count,mark,report,csv,csvCell,backup,parseBackup};
+  const nameKey=name=>String(name).normalize('NFC').replace(/\s+/g,'').toLocaleLowerCase();
+  function parseContactName(name,keywords=DEFAULT_KEYWORDS) {
+    const cleaned=String(name||'').trim();
+    const entries=Object.entries(keywords).flatMap(([role,list])=>list.map(word=>({role,word}))).sort((a,b)=>b.word.length-a.word.length);
+    for(const {role,word} of entries){
+      const key=word.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+      const after=new RegExp('^(.*?)\\s*[(（\\[<]?\\s*'+key+'\\s*[)）\\]>]?$','u');
+      const before=new RegExp('^[(（\\[<]?\\s*'+key+'\\s*[)）\\]>]?\\s+(.+)$','u');
+      const match=cleaned.match(after)||cleaned.match(before);if(!match)continue;
+      const studentName=match[1].replace(/^[\s(（\[<]+|[\s)）\]>]+$/g,'').trim();
+      if(!studentName||studentName.length>30||/[\r\n]/.test(studentName))continue;
+      return {studentName,role};
+    }
+    return null;
+  }
+  function contactCandidates(contacts,state,keywords=state.settings.contactKeywords) {
+    const groups=new Map();
+    for(const c of contacts){const p=parseContactName(c.name,keywords),phone=normalizePhone(c.phone);if(!p||!phone)continue;const key=nameKey(p.studentName);if(!groups.has(key))groups.set(key,{key,name:p.studentName,guardians:[],studentContacts:[],matches:[]});const group=groups.get(key);const target=p.role==='student'?group.studentContacts:group.guardians;if(!target.some(x=>x.phone===phone))target.push({name:String(c.name).slice(0,80),phone,contactId:String(c.id||''),relation:p.role});}
+    for(const group of groups.values()){
+      for(const c of contacts)if(nameKey(c.name)===group.key&&normalizePhone(c.phone)&&!group.studentContacts.some(s=>s.phone===normalizePhone(c.phone)))group.studentContacts.push({name:c.name,phone:normalizePhone(c.phone),contactId:String(c.id||''),relation:'student'});
+      group.matches=state.students.filter(s=>nameKey(s.name)===group.key).map(s=>s.id);
+    }
+    return [...groups.values()].sort((a,b)=>a.name.localeCompare(b.name,'ko'));
+  }
+  function mergeCandidates(state,rows,classId,date=localDate()){
+    if(!classOf(state,classId)||classOf(state,classId).archived)throw new Error('등록할 반을 선택해 주세요.');
+    const next=clone(state);let added=0,updated=0;const targets=new Set();
+    for(const row of rows){
+      const name=String(row.name||'').trim();if(!name||name.length>30)throw new Error('학생 이름은 1~30자로 입력해 주세요.');
+      if(row.targetId==='unresolved')throw new Error(name+' 학생의 연결 대상을 직접 선택해 주세요.');
+      let s=row.targetId==='new'?null:next.students.find(s=>s.id===row.targetId);
+      if(row.targetId!=='new'&&!s)throw new Error('연결할 학생을 찾지 못했어요.');
+      const targetKey=s?s.id:'new:'+nameKey(name)+':'+classId;if(targets.has(targetKey))throw new Error('같은 학생이 두 번 선택됐어요. 등록 대상을 확인해 주세요.');targets.add(targetKey);
+      if(!s){if(next.students.some(s=>s.active&&s.classId===classId&&nameKey(s.name)===nameKey(name)))throw new Error(name+' 학생이 이미 이 반에 있어요. 기존 학생 연결을 선택해 주세요.');s={id:uid(),name,classId,memo:'',active:true,joinedDate:date,archivedDate:null,phone:'',contactId:'',guardians:[]};next.students.push(s);added++;}else updated++;
+      if(row.studentContact){const phone=normalizePhone(row.studentContact.phone);if(s.phone&&s.phone!==phone)throw new Error(name+' 학생의 기존 번호와 달라요. 학생 정보 수정에서 직접 변경해 주세요.');s.phone=phone;s.contactId=row.studentContact.contactId;}
+      for(const g of row.guardians){const phone=normalizePhone(g.phone);if(!phone)throw new Error('학부모 번호를 확인해 주세요.');if(s.guardians.some(x=>normalizePhone(x.phone)===phone))continue;s.guardians.push({id:uid(),name:g.name,relation:g.relation,phone,contactId:g.contactId,notify:true});}
+      if(s.guardians.length>6)throw new Error(name+' 학생의 학부모 연락처는 최대 6개까지 등록할 수 있어요.');
+    }
+    return {state:validate(next),added,updated};
+  }
+  function renderSms(state,record,template=state.settings.sms.template){
+    const values={'학원명':state.settings.academy,'학생이름':record.studentName,'반이름':record.className,'날짜':record.date,'시간':record.time||new Date(record.updatedAt).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',hour12:false}),'상태':LABELS[record.status],'선생님':state.settings.teacher,'메모':record.note};
+    return template.replace(/\{([^{}]+)\}/g,(full,key)=>Object.prototype.hasOwnProperty.call(values,key)?values[key]:full);
+  }
+  function smsChanges(before,after,today=localDate()){
+    if(!after.settings.sms.enabled)return [];
+    const prior=new Map(before.records.map(r=>[r.studentId+'|'+r.date,r]));
+    return after.records.filter(r=>r.date===today&&after.settings.sms.statuses.includes(r.status)&&(!prior.has(r.studentId+'|'+r.date)||prior.get(r.studentId+'|'+r.date).status!==r.status)&&after.students.some(s=>s.id===r.studentId&&s.active&&s.guardians.some(g=>g.notify))).map(r=>({studentId:r.studentId,date:r.date,status:r.status,updatedAt:r.updatedAt}));
+  }
+  return {STATUSES,LABELS,DEFAULT_TEMPLATE,DEFAULT_KEYWORDS,TOKENS,normalizePhone,nameKey,parseContactName,contactCandidates,mergeCandidates,renderSms,smsChanges,clone,localDate,validDate,shiftDate,uid,fresh,upgrade,validate,classOf,recordOf,roster,count,mark,report,csv,csvCell,backup,parseBackup};
 });
