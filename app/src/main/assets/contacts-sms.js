@@ -108,7 +108,7 @@
       const next=C.clone(state());next.settings.sms={enabled,statuses,template};if(A.save(next,enabled?'문자 자동 발송을 켰어요.':'문자 설정을 저장했어요.'))A.closeModal();
     });updatePreview();
   }
-  function updatePreview(){const input=$('#sms-template'),out=$('#sms-preview-text');if(!input||!out)return;out.textContent=C.renderSms(state(),{studentName:'김하늘',className:'수학 A반',date:C.localDate(),time:'16:00',status:'present',note:'',updatedAt:new Date().toISOString()},input.value);}
+  function updatePreview(){const input=$('#sms-template'),out=$('#sms-preview-text');if(!input||!out)return;out.textContent=C.renderSms(state(),{studentName:'김하늘',className:'전체 학생',date:C.localDate(),time:'16:00',status:'present',note:'',updatedAt:new Date().toISOString()},input.value);}
   function logsContent(){
     if(!N||!N.smsLogs)return '<p class="notice">문자 발송 기록은 Android 앱에서 확인할 수 있어요.</p>';
     let result;try{result=JSON.parse(N.smsLogs());}catch(_){return '<p class="notice">문자 기록을 읽지 못했어요.</p>';}
