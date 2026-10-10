@@ -44,6 +44,10 @@ jobs:
           mkdir -p out/sms-tests
           javac -encoding UTF-8 -d out/sms-tests app/src/main/java/kr/academy/attendance/SmsRules.java tests/SmsRulesTest.java
           java -cp out/sms-tests SmsRulesTest
+      - name: Native SMS callback and cancellation regressions
+        run: |
+          curl --fail --location --retry 3 https://repo.maven.apache.org/maven2/org/json/json/20240303/json-20240303.jar -o /tmp/attendance-json.jar
+          python tests/native_sms.py --json-jar /tmp/attendance-json.jar
       - name: Browser test dependencies
         run: |
           npm install --no-save playwright
@@ -62,10 +66,10 @@ jobs:
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platforms;android-35" "build-tools;35.0.0"
       - name: Build and verify test APK
-        run: python scripts/build_apk.py
+        run: python scripts/build_apk.py --output out/AcademyAttendance-1.2.2.apk
       - name: Publish test build
         uses: actions/upload-artifact@v4
         with:
-          name: academy-attendance-ci-test-install-only
-          path: out/AcademyAttendance.apk
+          name: academy-attendance-1.2.2-ci-test-install-only
+          path: out/AcademyAttendance-1.2.2.apk
           retention-days: 7

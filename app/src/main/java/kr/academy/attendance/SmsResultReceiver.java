@@ -9,7 +9,9 @@ public final class SmsResultReceiver extends BroadcastReceiver {
     @Override public void onReceive(Context context,Intent intent){
         if(intent==null||!(context.getPackageName()+".SMS_SENT").equals(intent.getAction()))return;
         String id=intent.getStringExtra("jobId");if(id==null)return;
-        PendingResult pending=goAsync();final int result=getResultCode();
-        new Thread(()->{try{SmsOutbox.result(context.getApplicationContext(),id,intent.getIntExtra("part",-1),result);}catch(Exception ignored){}finally{pending.finish();}},"sms-result").start();
+        // goAsync() detaches the result; getResultCode() afterwards returns 0.
+        final int result=getResultCode(),part=intent.getIntExtra("part",-1);
+        PendingResult pending=goAsync();
+        new Thread(()->{try{SmsOutbox.result(context.getApplicationContext(),id,part,result);}catch(Exception ignored){}finally{pending.finish();}},"sms-result").start();
     }
 }

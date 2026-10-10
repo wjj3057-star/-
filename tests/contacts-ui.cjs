@@ -75,6 +75,16 @@ async function main(){
   await page.setViewportSize({width:320,height:844});
   for(const name of ['sms-settings','keywords','auto-register']){await action(name).click();if(name==='auto-register'){await action('scan').click();await page.locator('.candidate-card').first().waitFor();}assert.equal(await page.evaluate(()=>document.querySelector('.modal').scrollWidth>document.querySelector('.modal').clientWidth+1),false,name+' overflow');await close();}
   await tab('students');await page.locator('[data-action=student-add]').click();assert.equal(await page.evaluate(()=>document.querySelector('.modal').scrollWidth>document.querySelector('.modal').clientWidth+1),false,'student form overflow');await close();
+  // A delayed scan must not replace a newer dialog or its unsaved draft.
+  await page.setViewportSize({width:390,height:844});await tab('settings');
+  await page.evaluate(()=>{window.originalContactLoader=window.NativeAttendance.loadContacts;window.pendingContactReads=[];window.NativeAttendance.loadContacts=id=>window.pendingContactReads.push(id);});
+  await action('auto-register').click();await action('scan').click();await action('keywords').click();await page.locator('[name=mother]').fill('어머니, 엄마, Mom');
+  await page.evaluate(()=>window.ContactSms.onContacts({ok:true,requestId:window.pendingContactReads[0],contacts:window.mockContacts}));
+  assert.equal(await page.locator('#modal-title').textContent(),'연락처 인식 키워드');assert.equal(await page.locator('[name=mother]').inputValue(),'어머니, 엄마, Mom');await close();
+  await action('auto-register').click();await action('scan').click();
+  await page.evaluate(()=>window.ContactSms.onContacts({ok:true,requestId:window.pendingContactReads.at(-1),contacts:[{id:'new-contact',name:'최다은 어머니',phone:'01012349876'}]}));
+  await page.locator('.candidate-card').first().waitFor();await page.getByRole('button',{name:'선택한 학생 등록',exact:true}).click();assert.equal((await read()).students.at(-1).name,'최다은');
+  await page.evaluate(()=>{window.NativeAttendance.loadContacts=window.originalContactLoader;});
   assert.deepEqual(errors,[]);console.log('Contacts/SMS UI passed: name ambiguity, import/rescan, manual picker, denied permission, SIM checks, template editing, save-before-send, status-only dispatch, restore disable, result/retry UI, 320px layout. No real contacts or SMS used.');
   if(process.env.QA_SCREENSHOT_DIR){
     const sc=await browser.newContext({viewport:{width:390,height:844},locale:'ko-KR',timezoneId:'Asia/Seoul',bypassCSP:true});await sc.addInitScript(nativeMock,{seed:await read(),contacts});const p=await sc.newPage();await p.clock.install({time:new Date('2026-10-09T07:30:00Z')});await p.goto(url);

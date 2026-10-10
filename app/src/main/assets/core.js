@@ -4,6 +4,7 @@
   else root.AttendanceCore = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   'use strict';
+  const MAX_BACKUP_BYTES = 25 * 1024 * 1024;
   const STATUSES = ['present', 'late', 'absent', 'excused'];
   const LABELS = {present: '출석', late: '지각', absent: '결석', excused: '공결', unmarked: '미출석'};
   const clone = value => JSON.parse(JSON.stringify(value));
@@ -165,9 +166,9 @@
   function csv(records) {
     return '\uFEFF' + [['날짜','학생','출석 상태','체크 시간','메모'],...records.slice().sort((a,b) => a.date.localeCompare(b.date) || a.studentName.localeCompare(b.studentName,'ko')).map(r => [r.date,r.studentName,LABELS[r.status],r.time,r.note])].map(row => row.map(csvCell).join(',')).join('\r\n');
   }
-  function backup(state) { return JSON.stringify({app:'오늘출석',exportedAt:new Date().toISOString(),data:validate(state)},null,2); }
+  function backup(state) { return JSON.stringify({app:'오늘출석',exportedAt:new Date().toISOString(),data:validate(state)}); }
   function parseBackup(raw) {
-    if (typeof raw !== 'string' || raw.length > 24 * 1024 * 1024) throw new Error('백업 파일이 너무 큽니다.');
+    if (typeof raw !== 'string' || raw.length > MAX_BACKUP_BYTES || new TextEncoder().encode(raw).length > MAX_BACKUP_BYTES) throw new Error('백업 파일이 너무 큽니다.');
     let value; try { value = JSON.parse(raw.replace(/^\uFEFF/,'')); } catch (_) { throw new Error('읽을 수 없는 백업 파일입니다.'); }
     if (!value || value.app !== '오늘출석' || !value.data) throw new Error('오늘출석에서 만든 JSON 백업 파일을 선택해 주세요.');
     return validate(value.data);
@@ -239,5 +240,5 @@
     const prior=new Map(before.records.map(r=>[r.studentId+'|'+r.date,r]));
     return after.records.filter(r=>r.date===today&&after.settings.sms.statuses.includes(r.status)&&(!prior.has(r.studentId+'|'+r.date)||prior.get(r.studentId+'|'+r.date).status!==r.status)&&after.students.some(s=>s.id===r.studentId&&s.active&&s.guardians.some(g=>g.notify))).map(r=>({studentId:r.studentId,date:r.date,status:r.status,updatedAt:r.updatedAt}));
   }
-  return {STATUSES,LABELS,DEFAULT_TEMPLATE,DEFAULT_KEYWORDS,DEFAULT_CLASS_ID,TOKENS,normalizePhone,nameKey,parseContactName,contactCandidates,mergeCandidates,renderSms,smsChanges,clone,localDate,validDate,shiftDate,uid,fresh,upgrade,validate,classOf,recordOf,roster,count,mark,markUnmarkedPresent,report,csv,csvCell,backup,parseBackup};
+  return {MAX_BACKUP_BYTES,STATUSES,LABELS,DEFAULT_TEMPLATE,DEFAULT_KEYWORDS,DEFAULT_CLASS_ID,TOKENS,normalizePhone,nameKey,parseContactName,contactCandidates,mergeCandidates,renderSms,smsChanges,clone,localDate,validDate,shiftDate,uid,fresh,upgrade,validate,classOf,recordOf,roster,count,mark,markUnmarkedPresent,report,csv,csvCell,backup,parseBackup};
 });

@@ -111,16 +111,35 @@
       if(A.save(next,'인식 키워드를 저장했어요.'))A.closeModal();
     });
   }
+  function toggleSmsEnabled(input){
+    const next=C.clone(state()),enabled=input.checked;
+    // Persist the switch independently of unfinished template/status edits.
+    if(enabled&&!next.settings.sms.statuses.length){
+      input.checked=false;
+      $('#sms-save-state').textContent='자동 발송 꺼짐 · 발송 대상을 먼저 저장해 주세요.';
+      A.formError('문자를 보낼 출결 상태를 하나 이상 선택하고 문자 설정 저장을 누른 뒤 자동 발송을 켜 주세요.');
+      return;
+    }
+    next.settings.sms.enabled=enabled;
+    if(A.save(next,'')){
+      $('#form-error').textContent='';$('#form-error').classList.remove('visible');
+      $('#sms-save-state').textContent=enabled?'자동 발송 켜짐 · 저장됨':'자동 발송 꺼짐 · 저장됨';
+      refreshPermissions();
+    }else{
+      input.checked=state().settings.sms.enabled;
+      $('#sms-save-state').textContent='변경을 저장하지 못했어요. 기존 '+(input.checked?'켜짐':'꺼짐')+' 설정을 유지합니다.';
+    }
+  }
   function smsSettings(){
     const config=state().settings.sms,info=device();
-    A.modal('출석 문자 설정',`<form id="sms-settings-form"><label class="sms-switch"><span><b>출석 체크 시 자동 발송</b><small>문자 수신을 켠 학부모에게 전송</small></span><input name="enabled" type="checkbox" ${config.enabled?'checked':''}></label><div class="notice">휴대폰의 기본 SMS용 SIM으로 발송해요. 요금제에 따라 문자 요금이 발생하며, 긴 문구는 여러 SMS로 나뉠 수 있어요.</div><p class="hint">권한·SIM 준비 전에도 설정을 저장할 수 있어요. 준비가 끝난 뒤 새로 체크하는 출결부터 문자를 보내요.</p><p id="sms-permission-state" class="hint"></p><div id="sms-permission-actions" class="row" ${info.smsGranted?'hidden':''}><button type="button" class="secondary small-button" data-contact-action="sms-permission">문자 권한 허용</button><button type="button" class="text-button" data-contact-action="app-settings">앱 권한 설정</button></div><div class="field section-gap"><span>어떤 출결에 문자를 보낼까요?</span><div class="sms-status-options">${C.STATUSES.map(s=>`<label class="toggle"><input name="statuses" type="checkbox" value="${s}" ${config.statuses.includes(s)?'checked':''}>${C.LABELS[s]}</label>`).join('')}</div></div><label class="field"><span>문자 문구</span><textarea id="sms-template" name="template" maxlength="500" rows="5" required>${e(config.template)}</textarea></label><div class="token-list">${C.TOKENS.filter(t=>t!=='반이름').map(t=>`<button type="button" data-contact-action="token" data-token="${t}">{${t}}</button>`).join('')}</div><button class="text-button" type="button" data-contact-action="reset-template">기본 문구로 되돌리기</button><div class="sms-preview"><small>예시 미리보기 · 실제로 보내지 않아요</small><p id="sms-preview-text"></p></div><p class="hint">오늘 날짜의 출결 상태를 새로 체크하거나 변경할 때 발송해요. 메모만 수정·과거 기록 수정·미확인 복귀·되돌리기·백업 복원은 문자를 보내지 않아요. 같은 학생·날짜·상태·수신 번호로는 자동 중복 발송하지 않아요. 이미 발송된 문자는 되돌릴 수 없어요.</p><div id="form-error" class="form-error" role="alert"></div><div class="modal-actions"><button type="button" class="secondary" data-action="close">취소</button><button class="primary" type="submit">문자 설정 저장</button></div></form>`,fd=>{
+    A.modal('출석 문자 설정',`<form id="sms-settings-form"><label class="sms-switch"><span><b>출석 체크 시 자동 발송</b><small>켜짐·꺼짐은 즉시 저장돼요</small></span><input id="sms-enabled" name="enabled" type="checkbox" aria-describedby="sms-save-state" ${config.enabled?'checked':''}></label><p id="sms-save-state" class="hint" role="status">자동 발송 ${config.enabled?'켜짐':'꺼짐'} · 저장된 설정</p><p class="hint">문구와 발송 대상 변경은 아래 문자 설정 저장 버튼으로 적용해 주세요.</p><div class="notice">휴대폰의 기본 SMS용 SIM으로 발송해요. 요금제에 따라 문자 요금이 발생하며, 긴 문구는 여러 SMS로 나뉠 수 있어요.</div><p class="hint">권한·SIM 준비 전에도 설정을 저장할 수 있어요. 준비가 끝난 뒤 새로 체크하는 출결부터 문자를 보내요.</p><p id="sms-permission-state" class="hint"></p><div id="sms-permission-actions" class="row" ${info.smsGranted?'hidden':''}><button type="button" class="secondary small-button" data-contact-action="sms-permission">문자 권한 허용</button><button type="button" class="text-button" data-contact-action="app-settings">앱 권한 설정</button></div><div class="field section-gap"><span>어떤 출결에 문자를 보낼까요?</span><div class="sms-status-options">${C.STATUSES.map(s=>`<label class="toggle"><input name="statuses" type="checkbox" value="${s}" ${config.statuses.includes(s)?'checked':''}>${C.LABELS[s]}</label>`).join('')}</div></div><label class="field"><span>문자 문구</span><textarea id="sms-template" name="template" maxlength="500" rows="5" required>${e(config.template)}</textarea></label><div class="token-list">${C.TOKENS.filter(t=>t!=='반이름').map(t=>`<button type="button" data-contact-action="token" data-token="${t}">{${t}}</button>`).join('')}</div><button class="text-button" type="button" data-contact-action="reset-template">기본 문구로 되돌리기</button><div class="sms-preview"><small>예시 미리보기 · 실제로 보내지 않아요</small><p id="sms-preview-text"></p></div><p class="hint">오늘 날짜의 출결 상태를 새로 체크하거나 변경할 때 발송해요. 메모만 수정·과거 기록 수정·미확인 복귀·되돌리기·백업 복원은 문자를 보내지 않아요. 같은 학생·날짜·상태·수신 번호로는 자동 중복 발송하지 않아요. 이미 발송된 문자는 되돌릴 수 없어요.</p><div id="form-error" class="form-error" role="alert"></div><div class="modal-actions"><button type="button" class="secondary" data-action="close">취소</button><button class="primary" type="submit">문자 설정 저장</button></div></form>`,fd=>{
       const enabled=fd.has('enabled'),info=device(),statuses=fd.getAll('statuses'),template=String(fd.get('template')||'').trim();
       if(enabled&&!statuses.length)return A.formError('문자를 보낼 출결 상태를 하나 이상 선택해 주세요.');if(!template)return A.formError('문자 문구를 입력해 주세요.');
       const unknown=[...template.matchAll(/\{([^{}]+)\}/g)].map(m=>m[1]).filter(t=>!C.TOKENS.includes(t));if(unknown.length)return A.formError('지원하지 않는 항목: '+unknown.join(', '));
       const next=C.clone(state());next.settings.sms={enabled,statuses,template};
       const pending=enabled?smsProblem(info):'';
       if(A.save(next,pending?'문자 설정을 저장했어요. '+pending:enabled?'문자 자동 발송을 켰어요.':'문자 설정을 저장했어요.'))A.closeModal();
-    });refreshPermissions(info);updatePreview();
+    });$('#sms-enabled').addEventListener('change',ev=>toggleSmsEnabled(ev.target));refreshPermissions(info);updatePreview();
   }
   function updatePreview(){const input=$('#sms-template'),out=$('#sms-preview-text');if(!input||!out)return;out.textContent=C.renderSms(state(),{studentName:'김하늘',className:'전체 학생',date:C.localDate(),time:'16:00',status:'present',note:'',updatedAt:new Date().toISOString()},input.value);}
   function logsContent(){
@@ -128,7 +147,7 @@
     let result;try{result=JSON.parse(N.smsLogs());}catch(_){return '<p class="notice">문자 기록을 읽지 못했어요.</p>';}
     if(!result.ok)return `<p class="notice">${e(result.error)}</p>`;
     if(!result.jobs.length)return '<p class="hint">아직 발송 기록이 없어요. 출석 문자 설정을 켜고 오늘 출석을 체크해 주세요.</p>';
-    const labels={sending:'결과 대기',sent:'발송 완료',failed:'발송 실패',unknown:'결과 미확인'};
+    const labels={sending:'결과 대기',sent:'발송 완료',failed:'발송 실패',unknown:'결과 미확인',cancelled:'발송 취소'};
     return result.jobs.map(j=>`<article class="sms-log-card"><div class="row between"><b>${e(j.studentName)} · ${C.LABELS[j.attendanceStatus]||''}</b><span class="sms-state ${e(j.state)}">${labels[j.state]||'확인 필요'}</span></div><p class="hint">${e(j.guardianName)} · ${e(j.phone)}<br>${e(new Date(j.createdAt).toLocaleString('ko-KR'))} · ${j.parts||0}개 SMS 분량</p><p class="sms-message">${e(j.message)}</p>${j.error?`<p class="form-error visible">${e(j.error)}</p>`:''}${['failed','unknown'].includes(j.state)&&j.date===C.localDate()?`<button class="text-button" data-contact-action="retry" data-id="${e(j.id)}">이 문자 다시 보내기</button>`:''}</article>`).join('');
   }
   function smsLog(){A.modal('문자 발송 기록',`<p class="hint">최근 200건 · ‘발송 완료’는 통신사 전송 완료 응답이며 학부모의 수신·읽음 확인은 아니에요. 결과가 없으면 자동 재전송하지 않아요.</p><button class="text-button" data-contact-action="refresh-logs">새로고침</button><div id="sms-logs">${logsContent()}</div>`);}
@@ -168,6 +187,6 @@
   });
   document.addEventListener('input',ev=>{if(ev.target.id==='contact-search')showContactList(ev.target.value);if(ev.target.id==='sms-template')updatePreview();});
   setInterval(()=>{if($('#sms-logs')&&!document.hidden)$('#sms-logs').innerHTML=logsContent();},3000);
-  window.ContactSms={fields,readFields,details,studentTools,settingsHTML,afterAttendanceSave,onContacts,onPermission,onSmsQueue,onResume:()=>refreshPermissions(),handleBack:closePicker,onClose:()=>{contactAwaitingPermission=false;contactMode=null;scanToken='';contacts=[];candidates=[];}};
+  window.ContactSms={fields,readFields,details,studentTools,settingsHTML,afterAttendanceSave,onContacts,onPermission,onSmsQueue,onResume:()=>refreshPermissions(),handleBack:closePicker,onModalReplace:()=>{contactAwaitingPermission=false;contactMode=null;scanToken='';},onClose:()=>{contactAwaitingPermission=false;contactMode=null;scanToken='';contacts=[];candidates=[];}};
   A.render();
 })();

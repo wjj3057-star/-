@@ -30,6 +30,28 @@ async function main(){
   const submit=()=>page.locator('#modal-root button[type=submit]').click();
   await tab('settings');await page.locator('[data-action=academy-edit]').click();await page.locator('[name=academy]').fill('하늘 학원');await page.locator('[name=teacher]').fill('이선생');await submit();assert.equal((await read()).settings.academy,'하늘 학원');
   await page.reload();await tab('settings');await page.locator('[data-action=academy-edit]').click();assert.equal(await page.locator('[name=teacher]').inputValue(),'이선생');await close();
+  // Switch changes survive closing/restarting without the separate template-save button.
+  await action('sms-settings').click();
+  await page.locator('#sms-template').fill('{아직 작성 중}');
+  await page.locator('[name=enabled]').check();
+  assert.equal((await read()).settings.sms.enabled,true);
+  assert.equal((await read()).settings.sms.template,C.DEFAULT_TEMPLATE,'toggle must not commit an unfinished template');
+  assert.equal(await page.locator('#sms-template').inputValue(),'{아직 작성 중}');
+  assert.equal(await calls(),0,'enabling must not send historic attendance');
+  await close();await page.reload();await tab('settings');await action('sms-settings').click();
+  assert.equal(await page.locator('[name=enabled]').isChecked(),true);await close();
+  await tab('attendance');await page.locator('[data-action=mark][data-status=present]').click();
+  assert.equal(await calls(),1,'a saved toggle must enable the next attendance notification');
+  await page.locator('[data-action=mark][data-status=present]').click();
+  await page.evaluate(()=>window.mockCalls=[]);
+  await tab('settings');await action('sms-settings').click();
+  await page.locator('[name=enabled]').uncheck();assert.equal((await read()).settings.sms.enabled,false);
+  await page.evaluate(()=>window.mockSaveFails=true);
+  await page.locator('[name=enabled]').click();
+  assert.equal(await page.locator('[name=enabled]').isChecked(),false);
+  assert.equal((await read()).settings.sms.enabled,false);
+  assert.ok((await page.locator('#sms-save-state').textContent()).includes('저장하지 못했어요'));
+  await page.evaluate(()=>window.mockSaveFails=false);await close();
   // This used to block all preference saving when permission or a SIM was unavailable.
   await page.evaluate(()=>Object.assign(window.mockDevice,{smsGranted:false,simReady:false}));await action('sms-settings').click();
   const template='[{학원명}] {학생이름} · {상태} · {시간}';await page.locator('[name=enabled]').check();await page.locator('#sms-template').fill(template);await submit();
@@ -45,7 +67,9 @@ async function main(){
   await page.evaluate(()=>Object.assign(window.mockDevice,{smsGranted:true,simReady:false}));await page.locator('[data-action=mark][data-status=late]').click();assert.equal(await calls(),0);
   await page.evaluate(()=>window.mockDevice.simReady=true);await page.locator('[data-action=mark][data-status=present]').click();assert.equal(await calls(),1);
   await tab('settings');await action('sms-settings').click();assert.equal(await action('sms-permission').isVisible(),false);await page.locator('[name=enabled]').uncheck();for(const box of await page.locator('[name=statuses]').all())await box.uncheck();await submit();assert.equal((await read()).settings.sms.enabled,false);assert.deepEqual((await read()).settings.sms.statuses,[]);
-  await action('sms-settings').click();await page.locator('[name=enabled]').check();await submit();assert.ok((await page.locator('#form-error').textContent()).includes('하나 이상'));await page.locator('[name=statuses][value=present]').check();await page.locator('#sms-template').fill('{잘못된항목}');await submit();assert.ok((await page.locator('#form-error').textContent()).includes('지원하지 않는'));await page.locator('#sms-template').fill(draft);await submit();
+  await action('sms-settings').click();await page.locator('[name=enabled]').click();assert.ok((await page.locator('#form-error').textContent()).includes('하나 이상'));assert.equal(await page.locator('[name=enabled]').isChecked(),false);
+  await page.locator('[name=statuses][value=present]').check();await page.locator('#sms-template').fill('{잘못된항목}');await submit();assert.ok((await page.locator('#form-error').textContent()).includes('지원하지 않는'));await page.locator('#sms-template').fill(draft);await submit();
+  await action('sms-settings').click();await page.locator('[name=enabled]').check();await close();
   await action('keywords').click();await page.locator('[name=mother]').fill('어머니, 엄마, Mom');await submit();assert.deepEqual((await read()).settings.contactKeywords.mother,['어머니','엄마','Mom']);
   // Real persistence errors leave edits visible, show an inline error and allow retry.
   await page.locator('[data-action=academy-edit]').click();await page.locator('[name=academy]').fill('새 학원');await page.evaluate(()=>window.mockSaveFails=true);await submit();assert.equal((await read()).settings.academy,'하늘 학원');assert.equal(await page.locator('#form-error').isVisible(),true);assert.ok((await page.locator('#form-error').textContent()).includes('저장 공간'));assert.equal(await page.locator('[name=academy]').inputValue(),'새 학원');await page.evaluate(()=>window.mockSaveFails=false);await submit();assert.equal((await read()).settings.academy,'새 학원');

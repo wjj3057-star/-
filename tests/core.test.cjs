@@ -133,3 +133,23 @@ test('note-only edits do not create SMS events and daily rollover never resends 
 
 test('disabled SMS can keep an empty status selection; enabling still needs a target',()=>{const s=C.fresh();s.settings.sms.statuses=[];assert.deepEqual(C.parseBackup(C.backup(s)).settings.sms.statuses,[]);s.settings.sms.enabled=true;assert.throws(()=>C.validate(s));});
 test('the largest legacy class list migrates without blocking later settings saves',()=>{const s=C.fresh();s.classes=Array.from({length:200},(_,i)=>({...C.fresh().classes[0],id:'legacy_'+i,name:'기존 반 '+i}));const migrated=C.validate(s);assert.equal(migrated.classes.length,201);migrated.settings.academy='변경한 학원';assert.equal(C.validate(migrated).settings.academy,'변경한 학원');});
+
+test('large saved state remains exportable and restorable within the file limit',()=>{
+  const s=fixture(),base={...s.students[0],joinedDate:'2000-01-01'};
+  s.students=Array.from({length:1000},(_,i)=>({...base,id:'s'+i,name:'Student '+i}));
+  s.records=[];
+  for(let day=0;day<35;day++){
+    const date=C.shiftDate('2026-01-01',day);
+    for(const student of s.students)s.records.push({studentId:student.id,classId:C.DEFAULT_CLASS_ID,date,status:'present',note:'기'.repeat(160),studentName:student.name,className:'All',time:'16:00',updatedAt:'2026-10-08T16:00:00Z'});
+  }
+  assert.ok(Buffer.byteLength(JSON.stringify(s),'utf8')<24*1024*1024);
+  const raw=C.backup(s);
+  assert.ok(Buffer.byteLength(raw,'utf8')<=C.MAX_BACKUP_BYTES);
+  assert.deepEqual(C.parseBackup(raw),C.validate(s));
+});
+test('backup import limit measures UTF-8 bytes for Korean text',()=>{
+  const raw=JSON.stringify({app:'오늘출석',data:C.fresh(),padding:'가'.repeat(Math.ceil(25*1024*1024/3))});
+  assert.ok(raw.length<25*1024*1024);
+  assert.ok(Buffer.byteLength(raw,'utf8')>25*1024*1024);
+  assert.throws(()=>C.parseBackup(raw),/백업 파일이 너무 큽니다/);
+});

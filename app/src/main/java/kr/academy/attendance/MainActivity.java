@@ -42,10 +42,12 @@ import java.util.concurrent.Executors;
 /** Local-only app shell; optional contacts and carrier SMS use Android permissions. */
 public final class MainActivity extends Activity {
     private static final String ORIGIN = "https://appassets.androidplatform.net";
-    private static final int EXPORT = 100, IMPORT = 101, CONTACT_PERMISSION = 110, SMS_PERMISSION = 111, MAX_BYTES = 24 * 1024 * 1024;
+    private static final int EXPORT = 100, IMPORT = 101, CONTACT_PERMISSION = 110, SMS_PERMISSION = 111, MAX_BYTES = 24 * 1024 * 1024, MAX_FILE_BYTES = 25 * 1024 * 1024;
     private final Set<String> assets = new HashSet<>(Arrays.asList("/index.html", "/styles.css", "/core.js", "/app.js", "/contacts-sms.js"));
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private final Object stateLock = new Object();
+    private JSONObject savedSnapshot;
+    private long smsEpoch;
     private WebView webView;
     private AtomicFile dataFile;
     private byte[] pendingExport;
@@ -115,12 +117,13 @@ public final class MainActivity extends Activity {
         try { return new JSONObject().put("ok", ok).put("data", data).toString(); }
         catch (Exception ignored) { return "{\"ok\":false}"; }
     }
-    private static byte[] readLimited(InputStream input) throws Exception {
+    private static byte[] readLimited(InputStream input) throws Exception { return readLimited(input, MAX_BYTES); }
+    private static byte[] readLimited(InputStream input, int limit) throws Exception {
         if (input == null) throw new FileNotFoundException();
         try (InputStream in = input; ByteArrayOutputStream out = new ByteArrayOutputStream()) {
             byte[] buffer = new byte[8192]; int length;
             while ((length = in.read(buffer)) != -1) {
-                if (out.size() + length > MAX_BYTES) throw new IllegalArgumentException("File too large");
+                if (out.size() + length > limit) throw new IllegalArgumentException("File too large");
                 out.write(buffer, 0, length);
             }
             return out.toByteArray();
@@ -153,6 +156,9 @@ public final class MainActivity extends Activity {
                     if (value.getInt("schema") != 2 || value.getJSONArray("students").length() > 5000 || value.getJSONArray("classes").length() > 201 || value.getJSONArray("records").length() > 100000) return envelope(false, "");
                     value.getJSONObject("settings");
                     out = dataFile.startWrite(); out.write(bytes); dataFile.finishWrite(out);
+                    savedSnapshot = value;
+                    // Disable invalidates pending requests even if immediately enabled again.
+                    if (!value.getJSONObject("settings").getJSONObject("sms").optBoolean("enabled")) smsEpoch++;
                     return envelope(true, "");
                 } catch (Exception error) { if (out != null) dataFile.failWrite(out); return envelope(false, ""); }
             }
@@ -160,7 +166,7 @@ public final class MainActivity extends Activity {
         @JavascriptInterface public void exportFile(String name, String mime, String content) {
             if (content == null || name == null || (!"application/json".equals(mime) && !"text/csv".equals(mime))) return;
             final byte[] bytes = content.getBytes(StandardCharsets.UTF_8);
-            if (bytes.length > MAX_BYTES) { notifyResult("파일이 너무 커서 저장할 수 없어요. 월별 CSV로 나누어 저장해 주세요."); return; }
+            if (bytes.length > MAX_FILE_BYTES) { notifyResult("파일이 25MB를 초과하여 저장할 수 없어요."); return; }
             final String safeName = name.replaceAll("[\\\\/:*?\"<>|\\p{Cntrl}]", "_");
             runOnUiThread(() -> {
                 if (pickerOpen) return;
@@ -203,18 +209,35 @@ public final class MainActivity extends Activity {
         @JavascriptInterface public void openAppSettings(){runOnUiThread(()->startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,Uri.parse("package:"+getPackageName()))));}
         @JavascriptInterface public void sendAttendanceSms(String raw){
             if(raw==null||raw.length()>2*1024*1024)return;
+            final SmsOutbox.StateReader reader=smsStateReader();
             io.execute(()->{try{
                 JSONArray changes=new JSONArray(raw);if(changes.length()>5000)throw new Exception("한 번에 처리할 학생이 너무 많아요.");
-                JSONObject snapshot=readSnapshot();JSONObject result=SmsOutbox.send(getApplicationContext(),snapshot,changes);result.put("ok",true);addon("onSmsQueue",result);
+                JSONObject result=SmsOutbox.send(getApplicationContext(),reader,changes);result.put("ok",true);addon("onSmsQueue",result);
             }catch(Exception e){addonError("onSmsQueue",e.getMessage()==null?"문자 요청을 처리하지 못했어요.":e.getMessage());}});
         }
         @JavascriptInterface public String smsLogs(){try{return SmsOutbox.logs(MainActivity.this).toString();}catch(Exception e){return "{\"ok\":false,\"error\":\"문자 기록을 읽지 못했어요. 중복 방지를 위해 자동 발송을 중단합니다.\"}";}}
         @JavascriptInterface public void retrySms(String id){
             if(id==null||id.length()>80)return;
-            io.execute(()->{try{SmsOutbox.retry(getApplicationContext(),readSnapshot(),id);addon("onSmsQueue",new JSONObject().put("ok",true).put("message","재전송을 요청했어요. 문자 발송 기록에서 결과를 확인해 주세요."));}catch(Exception e){addonError("onSmsQueue",e.getMessage());}});
+            final SmsOutbox.StateReader reader=smsStateReader();
+            io.execute(()->{try{SmsOutbox.retry(getApplicationContext(),reader,id);addon("onSmsQueue",new JSONObject().put("ok",true).put("message","재전송을 요청했어요. 문자 발송 기록에서 결과를 확인해 주세요."));}catch(Exception e){addonError("onSmsQueue",e.getMessage());}});
         }
     }
-    private JSONObject readSnapshot() throws Exception {synchronized(stateLock){return new JSONObject(new String(readLimited(dataFile.openRead()),StandardCharsets.UTF_8));}}
+    private JSONObject readSnapshot() throws Exception {
+        synchronized(stateLock){
+            if(savedSnapshot==null)savedSnapshot=new JSONObject(new String(readLimited(dataFile.openRead()),StandardCharsets.UTF_8));
+            return savedSnapshot;
+        }
+    }
+    private SmsOutbox.StateReader smsStateReader(){
+        final long requestEpoch;
+        synchronized(stateLock){requestEpoch=smsEpoch;}
+        return new SmsOutbox.StateReader(){
+            public Object lock(){return stateLock;}
+            public JSONObject read() throws Exception {
+                synchronized(stateLock){return requestEpoch==smsEpoch?readSnapshot():null;}
+            }
+        };
+    }
     private void addon(String method,JSONObject value){runOnUiThread(()->{if(!isFinishing()&&webView!=null)webView.evaluateJavascript("window.ContactSms&&window.ContactSms."+method+"("+value.toString()+")",null);});}
     private void addonError(String method,String error){try{addon(method,new JSONObject().put("ok",false).put("error",error==null?"요청을 처리하지 못했어요.":error));}catch(Exception ignored){}}
     private void permissionResult(){try{addon("onPermission",new JSONObject(new Bridge().deviceInfo()));}catch(Exception ignored){}}
@@ -268,9 +291,9 @@ public final class MainActivity extends Activity {
         } else {
             io.execute(() -> {
                 try {
-                    String content = new String(readLimited(getContentResolver().openInputStream(uri)), StandardCharsets.UTF_8);
+                    String content = new String(readLimited(getContentResolver().openInputStream(uri), MAX_FILE_BYTES), StandardCharsets.UTF_8);
                     runOnUiThread(() -> { if (!isFinishing() && webView != null) webView.evaluateJavascript("window.AttendanceApp&&window.AttendanceApp.onImport(" + JSONObject.quote(content) + ")", null); });
-                } catch (Exception error) { notifyResult("백업을 읽지 못했어요. 24MB 이하의 오늘출석 JSON 파일인지 확인해 주세요."); }
+                } catch (Exception error) { notifyResult("백업을 읽지 못했어요. 25MB 이하의 오늘출석 JSON 파일인지 확인해 주세요."); }
             });
         }
     }
