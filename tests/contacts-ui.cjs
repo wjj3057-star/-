@@ -78,7 +78,7 @@ async function main(){
   // A delayed scan must not replace a newer dialog or its unsaved draft.
   await page.setViewportSize({width:390,height:844});await tab('settings');
   await page.evaluate(()=>{window.originalContactLoader=window.NativeAttendance.loadContacts;window.pendingContactReads=[];window.NativeAttendance.loadContacts=id=>window.pendingContactReads.push(id);});
-  await action('auto-register').click();await action('scan').click();await action('keywords').click();await page.locator('[name=mother]').fill('어머니, 엄마, Mom');
+  await action('auto-register').click();await action('scan').click();await page.locator('#modal-root [data-contact-action=keywords]').click();await page.locator('[name=mother]').fill('어머니, 엄마, Mom');
   await page.evaluate(()=>window.ContactSms.onContacts({ok:true,requestId:window.pendingContactReads[0],contacts:window.mockContacts}));
   assert.equal(await page.locator('#modal-title').textContent(),'연락처 인식 키워드');assert.equal(await page.locator('[name=mother]').inputValue(),'어머니, 엄마, Mom');await close();
   await action('auto-register').click();await action('scan').click();
