@@ -5,7 +5,6 @@ import android.util.AtomicFile;
 import org.json.JSONObject;
 import java.io.File;
 import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
@@ -46,7 +45,6 @@ public final class AttendanceStore {
         }catch(Exception e){return envelope(false,"","저장된 데이터를 읽지 못했어요.");}
     }
     public synchronized String saveState(String raw){
-        FileOutputStream out=null;
         try{
             if(raw==null)return envelope(false,"","저장할 데이터가 없어요.");
             byte[] bytes=raw.getBytes(StandardCharsets.UTF_8);
@@ -58,11 +56,11 @@ public final class AttendanceStore {
             // overwrite valid data and only then return an error to the WebView.
             JSONObject settings=next.getJSONObject("settings");
             boolean enabled=settings.getJSONObject("sms").getBoolean("enabled");
-            out=file.startWrite();out.write(bytes);file.finishWrite(out);out=null;
+            AtomicWrite.write(file,bytes);
             snapshot=next;
             if(!enabled)smsEpoch++;
             return envelope(true,"","");
-        }catch(Exception e){if(out!=null)file.failWrite(out);return envelope(false,"","저장에 실패했어요. 기기의 저장 공간을 확인해 주세요.");}
+        }catch(Exception e){return envelope(false,"","저장을 완료하지 못했어요. 기기의 저장 공간을 확인한 뒤 다시 시도해 주세요.");}
     }
     private synchronized JSONObject snapshot() throws Exception {
         if(snapshot==null)snapshot=new JSONObject(readFile());

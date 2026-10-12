@@ -14,7 +14,6 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 import java.io.File;
 import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.time.Instant;
@@ -45,9 +44,7 @@ public final class SmsOutbox {
         }
     }
     private static void write(Context context, JSONArray jobs) throws Exception {
-        AtomicFile f=file(context); FileOutputStream out=null;
-        try { out=f.startWrite();out.write(jobs.toString().getBytes(StandardCharsets.UTF_8));f.finishWrite(out); }
-        catch(Exception e){if(out!=null)f.failWrite(out);throw e;}
+        AtomicWrite.write(file(context),jobs.toString().getBytes(StandardCharsets.UTF_8));
     }
     public static String today() { return new SimpleDateFormat("yyyy-MM-dd",Locale.US).format(new Date()); }
     public static boolean capable(Context c) { return c.getPackageManager().hasSystemFeature(PackageManager.FEATURE_TELEPHONY_MESSAGING) || c.getPackageManager().hasSystemFeature(PackageManager.FEATURE_TELEPHONY); }
@@ -144,9 +141,21 @@ public final class SmsOutbox {
                 setState(c,job.getString("id"),"cancelled","설정 또는 출결·수신 대상이 변경되어 발송을 취소했어요.");
                 return -1;
             }
-            try { manager.sendMultipartTextMessage(job.getString("phone"),null,parts,sent,null);return 1; }
-            catch(SecurityException e){fail(c,job.getString("id"),"Android가 문자 발송을 허용하지 않았어요. 앱 권한을 확인해 주세요.");return 0;}
-            catch(Exception e){setState(c,job.getString("id"),"unknown","발송 요청 결과를 확인할 수 없어요. 수신 여부를 확인한 뒤 다시 시도해 주세요.");return 0;}
+            synchronized(LOCK){
+                // An earlier attempt may finish while this retry is being prepared.
+                // Serialize this last check and handoff with result callbacks.
+                JSONArray jobs=read(c);
+                for(int i=0;i<jobs.length();i++){
+                    JSONObject prior=jobs.getJSONObject(i);
+                    if(job.getString("key").equals(prior.getString("key"))&&!job.getString("id").equals(prior.getString("id"))&&"sent".equals(prior.optString("state"))){
+                        setState(c,job.getString("id"),"cancelled","이전 문자의 발송 완료가 확인되어 재전송을 취소했어요.");
+                        return -1;
+                    }
+                }
+                try { manager.sendMultipartTextMessage(job.getString("phone"),null,parts,sent,null);return 1; }
+                catch(SecurityException e){fail(c,job.getString("id"),"Android가 문자 발송을 허용하지 않았어요. 앱 권한을 확인해 주세요.");return 0;}
+                catch(Exception e){setState(c,job.getString("id"),"unknown","발송 요청 결과를 확인할 수 없어요. 수신 여부를 확인한 뒤 다시 시도해 주세요.");return 0;}
+            }
         }
     }
     private static void fail(Context c,String id,String error) throws Exception {setState(c,id,"failed",error);}
@@ -156,7 +165,9 @@ public final class SmsOutbox {
             for(int i=0;i<jobs.length();i++){
                 JSONObject j=jobs.getJSONObject(i);
                 if(!id.equals(j.getString("id"))||"cancelled".equals(j.optString("state"))||part<0||part>=j.optInt("parts"))continue;
-                j.getJSONObject("results").put(String.valueOf(part),code);
+                JSONObject results=j.getJSONObject("results");String key=String.valueOf(part);
+                if(results.has(key)&&(results.getInt(key)==Activity.RESULT_OK||results.getInt(key)==code))return;
+                results.put(key,code);
                 summarize(j,System.currentTimeMillis());changed=true;break;
             }
             if(changed)write(c,jobs);
@@ -242,7 +253,7 @@ public final class SmsOutbox {
             retry=new JSONObject(old.toString()).put("id",UUID.randomUUID().toString()).put("createdAt",System.currentTimeMillis()).put("state","sending").put("error","").put("resultVersion",2).put("parts",0).put("results",new JSONObject());jobs.put(retry);write(c,jobs);
         }
         int outcome=transmit(c,retry,reader);
-        if(outcome<0)throw new Exception("설정 또는 출결·수신 대상이 변경되어 재전송을 취소했어요.");
+        if(outcome<0)throw new Exception("발송 완료 확인 또는 설정·출결·수신 대상 변경으로 재전송을 취소했어요.");
         if(outcome==0)throw new Exception("재전송 요청을 완료하지 못했어요. 문자 발송 기록에서 원인을 확인해 주세요.");
     }
 }

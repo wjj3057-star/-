@@ -41,12 +41,14 @@ public class SmsManager {
 "android/util/AtomicFile.java": """package android.util;
 import java.io.*;
 public class AtomicFile {
- private final File file; public static Runnable afterWrite; public static boolean failWrites=false; public AtomicFile(File f){file=f;} public File getBaseFile(){return file;}
- public InputStream openRead() throws IOException {return new FileInputStream(file);}
- public byte[] readFully() throws IOException {try(InputStream in=new FileInputStream(file)){return in.readAllBytes();}}
- public FileOutputStream startWrite() throws IOException {if(failWrites)throw new IOException("Disk full");file.getParentFile().mkdirs();return new FileOutputStream(file);}
- public void finishWrite(FileOutputStream out) throws IOException {out.close();if(afterWrite!=null)afterWrite.run();}
- public void failWrite(FileOutputStream out) {try{out.close();}catch(IOException ignored){}}
+ private final File file,stage; public static Runnable afterWrite; public static boolean failWrites=false,failMidWrite=false,failCommit=false;
+ public AtomicFile(File f){file=f;stage=new File(f+".new");} public File getBaseFile(){return file;}
+ public InputStream openRead() throws IOException {if(file.exists())stage.delete();return new FileInputStream(file);}
+ public byte[] readFully() throws IOException {try(InputStream in=openRead()){return in.readAllBytes();}}
+ public FileOutputStream startWrite() throws IOException {if(failWrites)throw new IOException("Disk full");file.getParentFile().mkdirs();return new FileOutputStream(stage){public void write(byte[] b)throws IOException {if(failMidWrite){super.write(b,0,b.length/2);throw new IOException("Disk filled mid-write");}super.write(b);}};}
+ // Android's finishWrite logs a failed rename without throwing.
+ public void finishWrite(FileOutputStream out) throws IOException {out.close();if(failCommit)return;java.nio.file.Files.move(stage.toPath(),file.toPath(),java.nio.file.StandardCopyOption.REPLACE_EXISTING);if(afterWrite!=null)afterWrite.run();}
+ public void failWrite(FileOutputStream out) {try{out.close();}catch(IOException ignored){}stage.delete();}
 }""",
 "NativeSmsTest.java": r"""import kr.academy.attendance.*;
 import android.content.*; import android.telephony.SmsManager; import android.util.AtomicFile;
@@ -64,7 +66,7 @@ public class NativeSmsTest {
    .put("records",new JSONArray().put(new JSONObject().put("studentId","s").put("studentName","Student").put("className","All").put("date",SmsOutbox.today()).put("status","present").put("note","").put("time","16:00").put("updatedAt","2026-10-10T07:00:00Z")));
  }
  static JSONArray changes(){return new JSONArray().put(new JSONObject().put("studentId","s").put("date",SmsOutbox.today()).put("status","present"));}
- static Context context(Path root,String name)throws Exception{SmsManager.sent.clear();SmsManager.onSend=null;SmsManager.partCount=1;SmsManager.preparationFailures=0;SmsManager.failAfterHandoff=false;AtomicFile.afterWrite=null;AtomicFile.failWrites=false;return new Context(Files.createDirectories(root.resolve(name)).toFile());}
+ static Context context(Path root,String name)throws Exception{SmsManager.sent.clear();SmsManager.onSend=null;SmsManager.partCount=1;SmsManager.preparationFailures=0;SmsManager.failAfterHandoff=false;AtomicFile.afterWrite=null;AtomicFile.failWrites=false;AtomicFile.failMidWrite=false;AtomicFile.failCommit=false;return new Context(Files.createDirectories(root.resolve(name)).toFile());}
  static JSONObject latest(Context c)throws Exception{return SmsOutbox.logs(c).getJSONArray("jobs").getJSONObject(0);}
  static void callback(Context c,int message,int part,int code)throws Exception{
   SmsResultReceiver receiver=new SmsResultReceiver();receiver.setResultCode(code);
@@ -173,10 +175,71 @@ public class StoreTest {
   JSONObject invalid=data(true);invalid.getJSONObject("settings").remove("sms");check(!save(store,invalid),"missing SMS settings rejected before write");check(Files.readString(file).equals(previous),"invalid save never overwrites durable state");
   AtomicFile.failWrites=true;check(!save(store,data(false)),"write error reported");AtomicFile.failWrites=false;
   check(Files.readString(file).equals(previous)&&store.smsStateReader().read().getJSONObject("settings").getJSONObject("sms").getBoolean("enabled"),"failed save retains file and active preferences");
+  AtomicFile.failMidWrite=true;check(!save(store,data(false)),"partial write error reported");AtomicFile.failMidWrite=false;
+  check(Files.readString(file).equals(previous),"a partial write keeps the committed file intact");
+  AtomicFile.failCommit=true;check(!save(store,data(false)),"silent atomic commit failure must not report success");AtomicFile.failCommit=false;
+  check(Files.readString(file).equals(previous)&&store.smsStateReader().read().getJSONObject("settings").getJSONObject("sms").getBoolean("enabled"),"failed commit retains active preferences");
   check(store.theme().equals("dark"),"saved theme available before WebView startup");
   Path broken=root.resolve("broken");Files.createDirectories(broken);Files.writeString(broken.resolve("attendance-v1.json"),"");
   check(!new JSONObject(AttendanceStore.get(new Context(broken.toFile())).readState()).getBoolean("ok"),"empty existing file is not a fresh install");
   System.out.println("Store passed: first run, durable save, recreation sharing, consent cancellation, invalid settings, write failure rollback and corrupt-file protection.");
+ }
+}"""
+
+SOURCES["DeepSmsTest.java"] = r"""import kr.academy.attendance.*;
+import android.content.Context;import android.telephony.SmsManager;import android.util.AtomicFile;
+import java.nio.file.*;import java.util.*;
+public class DeepSmsTest extends NativeSmsTest {
+ interface Scenario { void run() throws Exception; }
+ static final List<String> failures=new ArrayList<>();
+ static void scenario(String name,Scenario action){try{action.run();System.out.println("PASS "+name);}catch(Throwable e){failures.add(name+": "+e);}}
+ public static void main(String[] args)throws Exception{
+  Path root=Paths.get(args[0]);
+  scenario("confirmed success survives conflicting duplicate callbacks",()->{
+   Context c=context(root,"confirmed");Reader r=new Reader(fixture(1));SmsOutbox.send(c,r,changes());callback(c,0,0,-1);callback(c,0,0,4);
+   check(latest(c).getString("state").equals("sent"),"confirmed send must never regress to failed");
+   check(!latest(c).getBoolean("canRetry"),"confirmed send must never become retryable");
+  });
+  scenario("late original success during retry preparation cancels modem handoff",()->{
+   final Context c=context(root,"retry-race");Reader r=new Reader(fixture(1));SmsOutbox.send(c,r,changes());callback(c,0,0,4);
+   final String original=latest(c).getString("id");
+   Reader racing=new Reader(fixture(1)){int reads;public org.json.JSONObject read(){if(++reads==2)try{callback(c,0,0,-1);}catch(Exception e){throw new RuntimeException(e);}return super.read();}};
+   try{SmsOutbox.retry(c,racing,original);}catch(Exception expected){}
+   check(SmsManager.sent.size()==1,"already confirmed SMS was sent twice");
+   check(latest(c).getString("state").equals("cancelled"),"retry cancellation must be visible");
+  });
+  scenario("SMS cannot reach modem when its journal commit silently fails",()->{
+   Context c=context(root,"journal-commit");Reader r=new Reader(fixture(1));AtomicFile.failCommit=true;
+   try{SmsOutbox.send(c,r,changes());}catch(Exception expected){}
+   AtomicFile.failCommit=false;check(SmsManager.sent.isEmpty(),"SMS was transmitted without a committed journal");
+  });
+  if(!failures.isEmpty())throw new AssertionError(String.join("\n",failures));
+  System.out.println("Deep SMS passed: confirmed results and retry/callback interleaving.");
+ }
+}"""
+
+SOURCES["DocumentFlowTest.java"] = r"""import kr.academy.attendance.*;
+import java.nio.file.*;import java.io.*;import java.nio.charset.StandardCharsets;import java.util.*;
+public class DocumentFlowTest {
+ static void check(boolean ok,String message){if(!ok)throw new AssertionError(message);}
+ public static void main(String[] args)throws Exception{
+  Path cache=Paths.get(args[0]);Files.createDirectories(cache);
+  byte[] original="{\"학원\":\"백업 테스트\",\"메모\":\"줄1\\n줄2\"}".getBytes(StandardCharsets.UTF_8);
+  PendingExport first=new PendingExport(cache.toFile());String token=first.prepare(original);
+  PendingExport recreated=new PendingExport(cache.toFile());
+  try(InputStream in=recreated.open(token)){check(Arrays.equals(original,in.readAllBytes()),"export payload survives Activity recreation");}
+  byte[] next="another export".getBytes(StandardCharsets.UTF_8);String other=recreated.prepare(next);
+  recreated.discard(token);check(!Files.exists(cache.resolve(token)),"completed/cancelled export is removed");
+  try(InputStream in=recreated.open(other)){check(Arrays.equals(next,in.readAllBytes()),"cleanup never deletes another pending export");}
+  try{recreated.open("../outside");throw new AssertionError("invalid token accepted");}catch(IOException expected){}
+  try{recreated.prepare(new byte[PendingExport.MAX_BYTES+1]);throw new AssertionError("oversized export accepted");}catch(IOException expected){}
+  recreated.discard(other);try{recreated.open(other);throw new AssertionError("missing payload treated as valid");}catch(IOException expected){}
+  List<String> events=new ArrayList<>();UiEvents queue=new UiEvents(events::add);
+  queue.post("import");queue.post("result");check(events.isEmpty(),"early document result waits for the page");
+  queue.ready();check(events.equals(Arrays.asList("import","result")),"events reach the ready page in order");queue.ready();check(events.size()==2,"ready callback is idempotent");
+  queue.post("live");check(events.size()==3,"ready page receives new events");queue.close();queue.post("old Activity");check(events.size()==3,"destroyed page never receives a callback");
+  UiEvents destroyedBeforeReady=new UiEvents(events::add);destroyedBeforeReady.post("obsolete");destroyedBeforeReady.close();destroyedBeforeReady.ready();check(events.size()==3,"destroy drops undelivered imports");
+  System.out.println("Documents passed: recreated export, cleanup isolation, size/path checks and early WebView result delivery.");
  }
 }"""
 
@@ -196,13 +259,15 @@ def main():
             target.write_text(content, encoding="utf-8")
             files.append(str(target))
         production = ROOT / "app/src/main/java/kr/academy/attendance"
-        files += [str(production / name) for name in ("SmsOutbox.java", "SmsRules.java", "SmsResultReceiver.java", "AttendanceStore.java")]
+        files += [str(production / name) for name in ("SmsOutbox.java", "SmsRules.java", "SmsResultReceiver.java", "AttendanceStore.java", "AtomicWrite.java", "PendingExport.java", "UiEvents.java")]
         classes = base / "classes"
         classes.mkdir()
         subprocess.run(["java", "-m", "jdk.compiler/com.sun.tools.javac.Main", "-encoding", "UTF-8", "-cp", str(jar), "-d", str(classes), *files], check=True)
         import os
         subprocess.run(["java", "-cp", os.pathsep.join((str(classes), str(jar))), "NativeSmsTest", str(base / "data")], check=True)
         subprocess.run(["java", "-cp", os.pathsep.join((str(classes), str(jar))), "StoreTest", str(base / "store")], check=True)
+        subprocess.run(["java", "-cp", os.pathsep.join((str(classes), str(jar))), "DeepSmsTest", str(base / "deep")], check=True)
+        subprocess.run(["java", "-cp", os.pathsep.join((str(classes), str(jar))), "DocumentFlowTest", str(base / "documents")], check=True)
 
 if __name__ == "__main__":
     main()

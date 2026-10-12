@@ -68,7 +68,9 @@
     if(!sms||typeof sms.enabled!=='boolean'||!Array.isArray(sms.statuses)||sms.statuses.length>4||(sms.enabled&&!sms.statuses.length)||new Set(sms.statuses).size!==sms.statuses.length||sms.statuses.some(s=>!STATUSES.includes(s))||!text(sms.template,500,true)||!kw)fail();
     for(const role of Object.keys(DEFAULT_KEYWORDS))if(!Array.isArray(kw[role])||kw[role].length>20||!kw[role].length||kw[role].some(k=>!text(k,20,true)))fail();
     const allKeywords=Object.values(kw).flat().map(k=>k.trim());if(new Set(allKeywords).size!==allKeywords.length)fail();
-    if (!Array.isArray(value.classes) || value.classes.length > 201 || !Array.isArray(value.students) || value.students.length > 5000 || !Array.isArray(value.records) || value.records.length > 100000) fail();
+    if (!Array.isArray(value.classes) || value.classes.length > 201 || !Array.isArray(value.students) || !Array.isArray(value.records)) fail();
+    if(value.students.length>5000)throw new Error('학생은 최대 5,000명까지 저장할 수 있어요. 기존 데이터는 유지됩니다.');
+    if(value.records.length>100000)throw new Error('출석 기록은 최대 100,000건까지 저장할 수 있어요. 기존 데이터는 유지됩니다. 전체 데이터 백업으로 기록을 보관해 주세요.');
     const ids = new Set(), studentIds = new Set(), keys = new Set();
     const idOK = x => typeof x === 'string' && /^[a-zA-Z0-9_-]{1,80}$/.test(x);
     for (const c of value.classes) {

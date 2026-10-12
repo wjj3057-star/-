@@ -47,13 +47,17 @@ public final class MainActivity extends Activity {
     private FrameLayout root;
     private volatile String themeMode="system";
     private AttendanceStore store;
-    private byte[] pendingExport;
+    private PendingExport exports;
+    private String pendingExportToken;
     private boolean pickerOpen;
     private String pendingContactRequest="";
+    private final UiEvents uiEvents=new UiEvents(script->{if(webView!=null)webView.evaluateJavascript(script,null);});
 
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         store = AttendanceStore.get(getApplicationContext());
+        exports = new PendingExport(getCacheDir());
+        if(savedInstanceState!=null){pendingExportToken=savedInstanceState.getString("exportToken");pickerOpen=savedInstanceState.getBoolean("pickerOpen",false);}
         themeMode = store.theme();
         setTheme(isDarkTheme() ? R.style.AppThemeDark : R.style.AppTheme);
         root = new FrameLayout(this);
@@ -154,6 +158,7 @@ public final class MainActivity extends Activity {
         }
     }
     public final class Bridge {
+        @JavascriptInterface public void ready(){runOnUiThread(()->uiEvents.ready());}
         @JavascriptInterface public String readState() { return store.readState(); }
         @JavascriptInterface public String saveState(String json) {
             String result=store.saveState(json);
@@ -166,12 +171,14 @@ public final class MainActivity extends Activity {
             final byte[] bytes = content.getBytes(StandardCharsets.UTF_8);
             if (bytes.length > MAX_FILE_BYTES) { notifyResult("파일이 25MB를 초과하여 저장할 수 없어요."); return; }
             final String safeName = name.replaceAll("[\\\\/:*?\"<>|\\p{Cntrl}]", "_");
+            final String token;
+            try{token=exports.prepare(bytes);}catch(Exception error){notifyResult("내보낼 파일을 준비하지 못했어요. 저장 공간을 확인해 주세요.");return;}
             runOnUiThread(() -> {
-                if (pickerOpen) return;
+                if (pickerOpen||isFinishing()||isDestroyed()){exports.discard(token);return;}
                 Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType(mime).putExtra(Intent.EXTRA_TITLE, safeName);
-                pendingExport = bytes; pickerOpen = true;
+                pendingExportToken = token; pickerOpen = true;
                 try { startActivityForResult(intent, EXPORT); }
-                catch (Exception error) { pendingExport = null; pickerOpen = false; notifyResult("파일 저장 앱을 열 수 없어요."); }
+                catch (Exception error) { exports.discard(token);pendingExportToken = null; pickerOpen = false; notifyResult("파일 저장 앱을 열 수 없어요."); }
             });
         }
         @JavascriptInterface public void importFile() {
@@ -212,16 +219,22 @@ public final class MainActivity extends Activity {
             io.execute(()->{try{
                 JSONArray changes=new JSONArray(raw);if(changes.length()>5000)throw new Exception("한 번에 처리할 학생이 너무 많아요.");
                 JSONObject result=SmsOutbox.send(getApplicationContext(),reader,changes);result.put("ok",true);addon("onSmsQueue",result);
-            }catch(Exception e){addonError("onSmsQueue",e.getMessage()==null?"문자 요청을 처리하지 못했어요.":e.getMessage());}});
+            }catch(Exception e){addonError("onSmsQueue",smsError(e));}});
         }
         @JavascriptInterface public String smsLogs(){try{return SmsOutbox.logs(MainActivity.this).toString();}catch(Exception e){return "{\"ok\":false,\"error\":\"문자 기록을 읽지 못했어요. 중복 방지를 위해 자동 발송을 중단합니다.\"}";}}
         @JavascriptInterface public void retrySms(String id){
             if(id==null||id.length()>80)return;
             final SmsOutbox.StateReader reader=store.smsStateReader();
-            io.execute(()->{try{SmsOutbox.retry(getApplicationContext(),reader,id);addon("onSmsQueue",new JSONObject().put("ok",true).put("message","재전송을 요청했어요. 문자 발송 기록에서 결과를 확인해 주세요."));}catch(Exception e){addonError("onSmsQueue",e.getMessage());}});
+            io.execute(()->{try{SmsOutbox.retry(getApplicationContext(),reader,id);addon("onSmsQueue",new JSONObject().put("ok",true).put("message","재전송을 요청했어요. 문자 발송 기록에서 결과를 확인해 주세요."));}catch(Exception e){addonError("onSmsQueue",smsError(e));}});
         }
     }
-    private void addon(String method,JSONObject value){runOnUiThread(()->{if(!isFinishing()&&webView!=null)webView.evaluateJavascript("window.ContactSms&&window.ContactSms."+method+"("+value.toString()+")",null);});}
+    private void postUi(String script){runOnUiThread(()->{if(!isFinishing())uiEvents.post(script);});}
+    private String smsError(Exception error){
+        if(error instanceof java.io.IOException)return "문자 요청을 저장하지 못해 추가 발송을 중단했어요. 저장 공간과 문자 발송 기록을 확인해 주세요.";
+        if(error instanceof org.json.JSONException)return "문자 기록을 확인하지 못해 추가 발송을 중단했어요. 문자 발송 기록에서 상태를 확인해 주세요.";
+        return error.getMessage()==null?"문자 요청을 처리하지 못했어요.":error.getMessage();
+    }
+    private void addon(String method,JSONObject value){postUi("window.ContactSms&&window.ContactSms."+method+"("+value.toString()+")");}
     private void addonError(String method,String error){try{addon(method,new JSONObject().put("ok",false).put("error",error==null?"요청을 처리하지 못했어요.":error));}catch(Exception ignored){}}
     private void permissionResult(){try{addon("onPermission",new JSONObject(new Bridge().deviceInfo()));}catch(Exception ignored){}}
     private void queryContacts(String requestId){
@@ -253,29 +266,33 @@ public final class MainActivity extends Activity {
         }else if(request==SMS_PERMISSION)permissionResult();
     }
     private void notifyResult(String message) {
-        runOnUiThread(() -> { if (!isFinishing() && webView != null) webView.evaluateJavascript("window.AttendanceApp&&window.AttendanceApp.onNativeResult(" + JSONObject.quote(message) + ")", null); });
+        postUi("window.AttendanceApp&&window.AttendanceApp.onNativeResult(" + JSONObject.quote(message) + ")");
+    }
+    @Override protected void onSaveInstanceState(Bundle out){
+        super.onSaveInstanceState(out);out.putString("exportToken",pendingExportToken);out.putBoolean("pickerOpen",pickerOpen);
     }
     @Override protected void onActivityResult(int request, int result, Intent intent) {
         super.onActivityResult(request, result, intent);
         if (request != EXPORT && request != IMPORT) return;
         pickerOpen = false;
-        final byte[] bytes = pendingExport; pendingExport = null;
-        if (result != RESULT_OK || intent == null || intent.getData() == null) return;
+        final String token = pendingExportToken; pendingExportToken = null;
+        if (result != RESULT_OK || intent == null || intent.getData() == null){exports.discard(token);return;}
         final Uri uri = intent.getData();
         if (request == EXPORT) {
-            if (bytes == null) { notifyResult("저장할 내용을 다시 선택해 주세요."); return; }
+            if (token == null) { notifyResult("저장할 내용을 다시 선택해 주세요."); return; }
             io.execute(() -> {
-                try (OutputStream out = getContentResolver().openOutputStream(uri, "wt")) {
+                try (InputStream in=exports.open(token);OutputStream out = getContentResolver().openOutputStream(uri, "wt")) {
                     if (out == null) throw new FileNotFoundException();
-                    out.write(bytes); out.flush();
-                } catch (Exception error) { notifyResult("파일을 저장하지 못했어요. 저장 위치와 공간을 확인해 주세요."); return; }
+                    byte[] buffer=new byte[8192];int count;while((count=in.read(buffer))!=-1)out.write(buffer,0,count);out.flush();
+                } catch (Exception error) { notifyResult("파일을 저장하지 못했어요. 저장 위치와 공간을 확인한 뒤 다시 내보내 주세요."); return; }
+                finally{exports.discard(token);}
                 notifyResult("파일을 저장했어요.");
             });
         } else {
             io.execute(() -> {
                 try {
                     String content = new String(readLimited(getContentResolver().openInputStream(uri), MAX_FILE_BYTES), StandardCharsets.UTF_8);
-                    runOnUiThread(() -> { if (!isFinishing() && webView != null) webView.evaluateJavascript("window.AttendanceApp&&window.AttendanceApp.onImport(" + JSONObject.quote(content) + ")", null); });
+                    postUi("window.AttendanceApp&&window.AttendanceApp.onImport(" + JSONObject.quote(content) + ")");
                 } catch (Exception error) { notifyResult("백업을 읽지 못했어요. 25MB 이하의 오늘출석 JSON 파일인지 확인해 주세요."); }
             });
         }
@@ -293,6 +310,8 @@ public final class MainActivity extends Activity {
         if (webView != null) webView.evaluateJavascript("window.AttendanceApp&&window.AttendanceApp.onResume()", null);
     }
     @Override protected void onDestroy() {
+        uiEvents.close();
+        if(isFinishing()&&exports!=null)exports.discard(pendingExportToken);
         if (webView != null) { webView.removeJavascriptInterface("NativeAttendance"); webView.destroy(); webView = null; }
         io.shutdown(); super.onDestroy();
     }

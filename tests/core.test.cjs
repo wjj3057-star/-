@@ -155,6 +155,12 @@ test('backup import limit measures UTF-8 bytes for Korean text',()=>{
 });
 
 
+test('storage limits explain the rejected operation without changing the source',()=>{
+  const students=C.fresh();students.students=Array.from({length:5001},(_,i)=>({id:'s'+i,name:'학생',classId:C.DEFAULT_CLASS_ID,memo:'',active:true,joinedDate:'2026-01-01',archivedDate:null,phone:'',contactId:'',guardians:[]}));
+  assert.throws(()=>C.validate(students),/5,000명/);assert.equal(students.students.length,5001);
+  const records=C.fresh();records.records=Array.from({length:100001},()=>({}));
+  assert.throws(()=>C.validate(records),/100,000건/);assert.equal(records.records.length,100001);
+});
 test('theme defaults migrate old data and roundtrip backups without mutating the input',()=>{
   const old=C.fresh();delete old.settings.theme;
   assert.equal(C.validate(old).settings.theme,'system');assert.equal(old.settings.theme,undefined);
