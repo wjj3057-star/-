@@ -32,7 +32,7 @@
   // Old class rows remain stored solely so historical attendance references still validate.
   const DEFAULT_CLASS_ID = '_all_students_';
   function singleClass() { return {id:DEFAULT_CLASS_ID,name:'전체 학생',color:'#8974C9',days:[0,1,2,3,4,5,6],time:'00:00',archived:false}; }
-  function fresh() { return {schema: 2, settings: {academy: '우리 학원', teacher: '',sms:{enabled:false,statuses:['present','late'],template:DEFAULT_TEMPLATE},contactKeywords:clone(DEFAULT_KEYWORDS)}, classes: [singleClass()], students: [], records: []}; }
+  function fresh() { return {schema: 2, settings: {academy: '우리 학원', teacher: '',theme:'system',showArchived:false,sms:{enabled:false,statuses:['present','late'],template:DEFAULT_TEMPLATE},contactKeywords:clone(DEFAULT_KEYWORDS)}, classes: [singleClass()], students: [], records: []}; }
   function normalizePhone(value) {
     if (typeof value !== 'string' || !/^[+\d\s().-]*$/.test(value)) return '';
     let n=value.replace(/[\s().-]/g,'');
@@ -61,6 +61,10 @@
     const fail = () => { throw new Error('올바른 오늘출석 백업 파일이 아닙니다. 원래 데이터는 유지됩니다.'); };
     if (!value || value.schema !== 2 || !value.settings || !text(value.settings.academy, 40, true) || !text(value.settings.teacher, 30)) fail();
     const sms=value.settings.sms,kw=value.settings.contactKeywords;
+    const theme=value.settings.theme===undefined?'system':value.settings.theme;
+    if(!['system','light','dark'].includes(theme))fail();
+    const showArchived=value.settings.showArchived===undefined?false:value.settings.showArchived;
+    if(typeof showArchived!=='boolean')fail();
     if(!sms||typeof sms.enabled!=='boolean'||!Array.isArray(sms.statuses)||sms.statuses.length>4||(sms.enabled&&!sms.statuses.length)||new Set(sms.statuses).size!==sms.statuses.length||sms.statuses.some(s=>!STATUSES.includes(s))||!text(sms.template,500,true)||!kw)fail();
     for(const role of Object.keys(DEFAULT_KEYWORDS))if(!Array.isArray(kw[role])||kw[role].length>20||!kw[role].length||kw[role].some(k=>!text(k,20,true)))fail();
     const allKeywords=Object.values(kw).flat().map(k=>k.trim());if(new Set(allKeywords).size!==allKeywords.length)fail();
@@ -84,7 +88,7 @@
       keys.add(key);
     }
     // Copy only known fields: never import prototypes, transient UI state or unrecognized settings.
-    return {schema: 2, settings: {academy: value.settings.academy.trim(), teacher: value.settings.teacher.trim(),sms:{enabled:sms.enabled,statuses:[...sms.statuses],template:sms.template},contactKeywords:Object.fromEntries(Object.keys(DEFAULT_KEYWORDS).map(k=>[k,kw[k].map(v=>v.trim())]))},
+    return {schema: 2, settings: {academy: value.settings.academy.trim(), teacher: value.settings.teacher.trim(),theme,showArchived,sms:{enabled:sms.enabled,statuses:[...sms.statuses],template:sms.template},contactKeywords:Object.fromEntries(Object.keys(DEFAULT_KEYWORDS).map(k=>[k,kw[k].map(v=>v.trim())]))},
       classes: value.classes.map(c => ({id:c.id,name:c.name.trim(),color:c.color,days:[...c.days],time:c.time,archived:c.archived})),
       students: value.students.map(s => ({id:s.id,name:s.name.trim(),classId:s.classId,memo:s.memo,active:s.active,joinedDate:s.joinedDate,archivedDate:s.archivedDate,phone:normalizePhone(s.phone),contactId:s.contactId,guardians:s.guardians.map(g=>({id:g.id,name:g.name.trim(),relation:g.relation,phone:normalizePhone(g.phone),notify:g.notify,contactId:g.contactId}))})),
       records: value.records.map(r => ({studentId:r.studentId,classId:r.classId,date:r.date,status:r.status,note:r.note,studentName:r.studentName,className:r.className,time:r.time,updatedAt:r.updatedAt}))};

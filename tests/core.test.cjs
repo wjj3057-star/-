@@ -153,3 +153,11 @@ test('backup import limit measures UTF-8 bytes for Korean text',()=>{
   assert.ok(Buffer.byteLength(raw,'utf8')>25*1024*1024);
   assert.throws(()=>C.parseBackup(raw),/백업 파일이 너무 큽니다/);
 });
+
+
+test('theme defaults migrate old data and roundtrip backups without mutating the input',()=>{
+  const old=C.fresh();delete old.settings.theme;
+  assert.equal(C.validate(old).settings.theme,'system');assert.equal(old.settings.theme,undefined);
+  for(const theme of ['system','light','dark']){const state=C.fresh();state.settings.theme=theme;assert.equal(C.parseBackup(C.backup(state)).settings.theme,theme);}
+  for(const theme of [null,'unknown',true]){const state=C.fresh();state.settings.theme=theme;assert.throws(()=>C.validate(state));}
+});

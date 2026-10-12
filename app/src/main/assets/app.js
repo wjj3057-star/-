@@ -25,7 +25,20 @@
     if (!raw.ok) throw new Error('저장된 데이터를 읽지 못했습니다. 앱을 다시 열거나 백업 파일을 복원해 주세요.');
     return raw.data ? C.validate(JSON.parse(raw.data)) : C.fresh();
   }
-  try { state = readState(); } catch (error) { loadError = error.message; }
+  try { state = readState(); ui.showArchived=state.settings.showArchived; } catch (error) { loadError = error.message; }
+  const themeLabels={system:'기기 설정에 따름',light:'라이트 모드',dark:'다크 모드'};
+  const systemTheme=window.matchMedia('(prefers-color-scheme: dark)');
+  function applyTheme(){
+    let systemDark=systemTheme.matches;
+    // Android WebView media queries may follow the Activity theme, not device settings.
+    try{const info=native&&native.deviceInfo?JSON.parse(native.deviceInfo()):null;if(info&&typeof info.systemDark==='boolean')systemDark=info.systemDark;}catch(_){}
+    const mode=state?.settings.theme||'system',dark=mode==='dark'||mode==='system'&&systemDark;
+    document.documentElement.dataset.theme=dark?'dark':'light';
+    document.documentElement.style.colorScheme=dark?'dark':'light';
+    document.querySelector('meta[name="theme-color"]').content=dark?'#12131b':'#F5F6F8';
+  }
+  if(systemTheme.addEventListener)systemTheme.addEventListener('change',applyTheme);else systemTheme.addListener(applyTheme);
+  applyTheme();
   function save(next, message, undo = false) {
     try {
       next = C.validate(next);
@@ -35,7 +48,7 @@
         if (!result.ok) throw new Error(result.error||'저장에 실패했습니다. 기기의 저장 공간을 확인해 주세요.');
       } else localStorage.setItem('oneul-attendance-v1', raw);
       undoState = undo ? C.clone(state) : null;
-      state = next; loadError = ''; render();
+      state = next; ui.showArchived=state.settings.showArchived; loadError = ''; applyTheme(); render();
       if (message) toast(message, undo); return true;
     } catch (error) { const message=error.message||'저장하지 못했습니다. 다시 시도해 주세요.';if($('#form-error'))formError(message);else toast(message);return false; }
   }
@@ -63,7 +76,7 @@
     const rows = C.roster(state,ui.date);
     const t = C.count(rows), checked=t.total-t.unmarked, percent=t.total?Math.round(checked/t.total*100):0;
     const greeting = state.settings.teacher ? state.settings.teacher+' 선생님' : state.settings.academy;
-    const hero = `<section class="hero" aria-label="출석 요약"><div class="hero-top"><div><p class="hero-label">${ui.date===today?'오늘의':'선택한 날짜의'} 출석 현황</p><div class="hero-number">${t.present+t.late}<span>/ ${t.total}명 등원</span></div><p class="hero-caption">${e(dateLong(ui.date))}</p></div><div class="ring-wrap"><svg viewBox="0 0 92 92" aria-hidden="true"><circle cx="46" cy="46" r="37" fill="none" stroke="#dcd5ef" stroke-width="7"/><circle cx="46" cy="46" r="37" fill="none" stroke="#9480d3" stroke-width="7" stroke-linecap="round" stroke-dasharray="${percent*2.3248} 232.48"/></svg><b>${percent}<span>%</span></b></div></div><div class="hero-stats">${[['present','green'],['late','amber'],['absent','red'],['excused',''],['unmarked','']].map(([s,cl])=>`<div class="hero-stat ${cl}"><b>${t[s]}</b><span>${C.LABELS[s]}</span></div>`).join('')}</div></section><p class="hint">체크 완료 ${checked}명 / ${t.total}명 · 공결은 출석률에서 제외돼요.</p>`;
+    const hero = `<section class="hero" aria-label="출석 요약"><div class="hero-top"><div><p class="hero-label">${ui.date===today?'오늘의':'선택한 날짜의'} 출석 현황</p><div class="hero-number">${t.present+t.late}<span>/ ${t.total}명 등원</span></div><p class="hero-caption">${e(dateLong(ui.date))}</p></div><div class="ring-wrap"><svg viewBox="0 0 92 92" aria-hidden="true"><circle cx="46" cy="46" r="37" fill="none" stroke="var(--ring-track,#dcd5ef)" stroke-width="7"/><circle cx="46" cy="46" r="37" fill="none" stroke="var(--ring-fill,#9480d3)" stroke-width="7" stroke-linecap="round" stroke-dasharray="${percent*2.3248} 232.48"/></svg><b>${percent}<span>%</span></b></div></div><div class="hero-stats">${[['present','green'],['late','amber'],['absent','red'],['excused',''],['unmarked','']].map(([s,cl])=>`<div class="hero-stat ${cl}"><b>${t[s]}</b><span>${C.LABELS[s]}</span></div>`).join('')}</div></section><p class="hint">체크 완료 ${checked}명 / ${t.total}명 · 공결은 출석률에서 제외돼요.</p>`;
     return head('출석 체크',greeting,`<div class="avatar" aria-hidden="true">${e((state.settings.teacher||'T').slice(0,1))}</div>`)+`<div class="attendance-layout"><div class="attendance-sidebar">${dateControls()}${hero}</div><section class="attendance-main"><div class="section-title"><h2>학생 출석부 <span class="count-tag">${rows.length}</span></h2><button class="text-button" data-action="student-add">${icon('plus')} 학생 추가</button></div><label class="search-box">${icon('search')}<input id="attendance-search" placeholder="학생 이름으로 검색" value="${e(ui.query)}" aria-label="출석부 학생 검색"></label><div class="list-tools"><button class="text-button" data-action="bulk-present" ${ui.date>today?'disabled':''}>미출석 모두 출석 ${icon('check')}</button></div>${ui.date>today?'<div class="notice">미래 날짜의 명단이에요. 출석은 해당 날짜부터 기록할 수 있어요.</div>':''}<div id="attendance-list">${attendanceList()}</div><div class="saving-footer">${icon('shield')}출석 기록은 자동으로 저장돼요</div></section></div>`;
   }
   function attendanceList() {
@@ -96,7 +109,7 @@
   }
   function settings() {
     const settingsRow=(action,im,label,sub)=>`<button class="settings-row" data-action="${action}"><span class="settings-icon">${icon(im)}</span><span class="settings-label"><b>${e(label)}</b><small>${e(sub)}</small></span>${icon('right')}</button>`;
-    return head('설정','우리 학원에 맞게 관리해 보세요')+`<div class="settings-layout"><section><div class="settings-title">학원 정보</div><div class="settings-card">${settingsRow('academy-edit','home',state.settings.academy,state.settings.teacher?state.settings.teacher+' 선생님':'학원 이름과 선생님 이름 설정')}</div><div class="settings-title">출석 관리</div><div class="white-card"><div class="row" style="color:#8873ad;margin-bottom:11px">${icon('calendar')}<h3>매일 자정 자동 초기화</h3></div><p class="modal-copy">매일 오전 0시에 새로운 출석부로 전환되어 모든 학생이 미출석으로 표시돼요. 어제까지의 출결 기록은 삭제되지 않고 출석 기록에서 조회할 수 있어요.</p></div></section><section>${window.ContactSms?window.ContactSms.settingsHTML():''}<div class="settings-title">데이터 관리</div><div class="settings-card">${settingsRow('backup','download','전체 데이터 백업','학생·출석 기록을 JSON 파일로 저장')}${settingsRow('import','upload','백업 파일 복원','저장해 둔 백업으로 현재 데이터를 교체')}${settingsRow('export-all','chart','전체 출석 기록 내보내기','엑셀에서 열 수 있는 CSV 파일로 저장')}</div><div class="white-card"><div class="row" style="color:#8873ad;margin-bottom:11px">${icon('shield')}<h3>이 기기에 안전하게 보관</h3></div><p class="modal-copy">학생 정보와 출석 기록은 이 기기에 저장돼요. 연락처 연동은 읽기 권한을, 학부모 문자는 SMS 권한과 문자 발송이 가능한 SIM을 사용해요. 다른 기기와 자동 동기화되지 않아요.</p><p class="hint">기기를 바꾸거나 앱을 삭제하기 전에 전체 데이터를 백업해 주세요.</p></div><p class="hint" style="text-align:center">오늘출석 1.2.2</p></section></div>`;
+    return head('설정','우리 학원에 맞게 관리해 보세요')+`<div class="settings-layout"><section><div class="settings-title">학원 정보</div><div class="settings-card">${settingsRow('academy-edit','home',state.settings.academy,state.settings.teacher?state.settings.teacher+' 선생님':'학원 이름과 선생님 이름 설정')}</div><div class="settings-title">화면 설정</div><div class="settings-card">${settingsRow('theme-edit','settings','화면 테마',themeLabels[state.settings.theme])}</div><div class="settings-title">출석 관리</div><div class="white-card"><div class="row" style="color:var(--accent);margin-bottom:11px">${icon('calendar')}<h3>매일 자정 자동 초기화</h3></div><p class="modal-copy">매일 오전 0시에 새로운 출석부로 전환되어 모든 학생이 미출석으로 표시돼요. 어제까지의 출결 기록은 삭제되지 않고 출석 기록에서 조회할 수 있어요.</p></div></section><section>${window.ContactSms?window.ContactSms.settingsHTML():''}<div class="settings-title">데이터 관리</div><div class="settings-card">${settingsRow('backup','download','전체 데이터 백업','학생·출석 기록을 JSON 파일로 저장')}${settingsRow('import','upload','백업 파일 복원','저장해 둔 백업으로 현재 데이터를 교체')}${settingsRow('export-all','chart','전체 출석 기록 내보내기','엑셀에서 열 수 있는 CSV 파일로 저장')}</div><div class="white-card"><div class="row" style="color:var(--accent);margin-bottom:11px">${icon('shield')}<h3>이 기기에 안전하게 보관</h3></div><p class="modal-copy">학생 정보와 출석 기록은 이 기기에 저장돼요. 연락처 연동은 읽기 권한을, 학부모 문자는 SMS 권한과 문자 발송이 가능한 SIM을 사용해요. 다른 기기와 자동 동기화되지 않아요.</p><p class="hint">기기를 바꾸거나 앱을 삭제하기 전에 전체 데이터를 백업해 주세요.</p></div><p class="hint" style="text-align:center">오늘출석 1.3.0</p></section></div>`;
   }
   function modal(title, body, onSubmit) {
     if(window.ContactSms&&window.ContactSms.onModalReplace)window.ContactSms.onModalReplace();
@@ -140,6 +153,20 @@
     });
     $('.modal').dataset.attendanceDate=date;
   }
+  function themeForm(){
+    modal('화면 테마',`<form id="theme-form"><p class="modal-copy">선택하면 바로 저장돼요. 기기 설정을 선택하면 휴대폰의 다크모드 변경을 자동으로 따라가요.</p><div class="theme-options">${Object.entries(themeLabels).map(([mode,label])=>`<label class="theme-choice"><input type="radio" name="theme" value="${mode}" ${state.settings.theme===mode?'checked':''}><span><b>${label}</b><small>${mode==='system'?'휴대폰 설정과 자동으로 맞추기':mode==='light'?'밝고 선명한 화면':'눈이 편한 어두운 화면'}</small></span></label>`).join('')}</div><p id="theme-save-state" class="hint" role="status">${themeLabels[state.settings.theme]} · 저장된 설정</p>${errorSlot}<button type="button" class="primary full" data-action="close">닫기</button></form>`);
+    $('#theme-form').addEventListener('change',ev=>{
+      if(ev.target.name!=='theme')return;
+      const next=C.clone(state);next.settings.theme=ev.target.value;
+      if(save(next,'')){
+        $('#form-error').textContent='';$('#form-error').classList.remove('visible');
+        $('#theme-save-state').textContent=themeLabels[state.settings.theme]+' · 저장됨';
+      }else{
+        $('#theme-form [value='+state.settings.theme+']').checked=true;
+        $('#theme-save-state').textContent='저장하지 못해 기존 테마를 유지합니다.';
+      }
+    });
+  }
   function academyForm(){modal('학원 정보',`<form><label class="field"><span>학원 이름</span><input name="academy" maxlength="40" required value="${e(state.settings.academy)}"></label><label class="field"><span>선생님 이름 <small style="display:inline">선택</small></span><input name="teacher" maxlength="30" value="${e(state.settings.teacher)}" placeholder="선생님 이름"></label>${errorSlot}<div class="modal-actions"><button type="button" class="secondary" data-action="close">취소</button><button type="submit" class="primary">저장</button></div></form>`,fd=>{const academy=String(fd.get('academy')||'').trim();if(!academy)return formError('학원 이름을 입력해 주세요.');const next=C.clone(state);next.settings={...next.settings,academy,teacher:String(fd.get('teacher')||'').trim()};if(save(next,'학원 정보를 저장했어요.'))closeModal();});}
   function exportFile(name,type,content){
     try {
@@ -168,6 +195,7 @@
     else if(a==='student-edit')studentForm(id);
     else if(a==='student-detail')studentDetail(id);
     else if(a==='academy-edit')academyForm();
+    else if(a==='theme-edit')themeForm();
     else if(a==='date-shift')setDate(C.shiftDate(ui.date,Number(b.dataset.amount)));
     else if(a==='today')setDate(today);
     else if(a==='date-select')setDate(b.dataset.date);
@@ -200,7 +228,7 @@
     else if(a==='export-all')exportFile(`오늘출석_전체기록_${today}.csv`,'text/csv',C.csv(state.records));
     else if(a==='export-month')exportFile(`오늘출석_${ui.month}_전체.csv`,'text/csv',C.csv(C.report(state,ui.month).records));
     else if(a==='import')requestImport();
-    else if(a==='reload'){try{state=readState();loadError='';}catch(error){loadError=error.message;}render();}
+    else if(a==='reload'){try{state=readState();loadError='';}catch(error){loadError=error.message;}applyTheme();render();}
   });
   document.addEventListener('input',ev=>{
     if(ev.target.id==='attendance-search'){ui.query=ev.target.value;$('#attendance-list').innerHTML=attendanceList();}
@@ -208,7 +236,7 @@
   });
   document.addEventListener('change',ev=>{
     if(ev.target.id==='attendance-date')setDate(ev.target.value);
-    else if(ev.target.id==='archived-toggle'){ui.showArchived=ev.target.checked;render();}
+    else if(ev.target.id==='archived-toggle'){const next=C.clone(state);next.settings.showArchived=ev.target.checked;if(!save(next,''))ev.target.checked=state.settings.showArchived;}
     else if(ev.target.id==='report-month'){if(C.validDate(ev.target.value+'-01')){ui.month=ev.target.value;render();}}
     else if(ev.target.id==='import-file'&&ev.target.files[0]){const file=ev.target.files[0];if(file.size>C.MAX_BACKUP_BYTES)return toast('백업 파일은 25MB 이하만 복원할 수 있어요.');file.text().then(handleImport).catch(()=>toast('파일을 읽지 못했어요.'));}
   });
@@ -230,6 +258,7 @@
     midnightTimer=setTimeout(onResume,Math.max(1,next.getTime()-now.getTime()+30));
   }
   function onResume(){
+    applyTheme();
     const now=C.localDate();
     if(now!==today){
       today=now;ui.date=now;ui.month=now.slice(0,7);ui.query='';undoState=null;

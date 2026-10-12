@@ -145,13 +145,42 @@ public final class SmsOutbox {
     private static void fail(Context c,String id,String error) throws Exception {setState(c,id,"failed",error);}
     private static void setState(Context c,String id,String state,String error) throws Exception {synchronized(LOCK){JSONArray jobs=read(c);for(int i=0;i<jobs.length();i++){JSONObject j=jobs.getJSONObject(i);if(id.equals(j.getString("id")))j.put("state",state).put("error",error);}write(c,jobs);}}
     public static void result(Context c,String id,int part,int code) throws Exception {
-        synchronized(LOCK){JSONArray jobs=read(c);for(int i=0;i<jobs.length();i++){
-            JSONObject j=jobs.getJSONObject(i);if(!id.equals(j.getString("id"))||part<0||part>=j.optInt("parts"))continue;
-            JSONObject results=j.getJSONObject("results");results.put(String.valueOf(part),code);
-            int failureCode=Activity.RESULT_OK;java.util.Iterator<String> keys=results.keys();while(keys.hasNext()){int result=results.getInt(keys.next());if(result!=Activity.RESULT_OK){failureCode=result;break;}}
-            if(failureCode!=Activity.RESULT_OK)j.put("state","failed").put("error",reason(failureCode));
-            else if(results.length()==j.getInt("parts"))j.put("state","sent").put("error","");
-        }write(c,jobs);}
+        synchronized(LOCK){JSONArray jobs=read(c);boolean changed=false;
+            for(int i=0;i<jobs.length();i++){
+                JSONObject j=jobs.getJSONObject(i);
+                if(!id.equals(j.getString("id"))||"cancelled".equals(j.optString("state"))||part<0||part>=j.optInt("parts"))continue;
+                j.getJSONObject("results").put(String.valueOf(part),code);
+                summarize(j,System.currentTimeMillis());changed=true;break;
+            }
+            if(changed)write(c,jobs);
+        }
+    }
+    // A multipart SMS has one result per part. Never label the whole request successful
+    // until every part is confirmed; give outstanding callbacks time before offering retry.
+    private static void summarize(JSONObject j,long now) throws Exception {
+        if("cancelled".equals(j.optString("state")))return;
+        JSONObject results=j.optJSONObject("results");int parts=j.optInt("parts");
+        int received=0,sent=0,failed=0,legacy=0,failureCode=Activity.RESULT_OK;
+        if(results!=null)for(int p=0;p<parts;p++){
+            String key=String.valueOf(p);if(!results.has(key))continue;
+            int code=results.getInt(key);received++;
+            if(code==Activity.RESULT_OK)sent++;
+            else if(code==0&&j.optInt("resultVersion")<2)legacy++;
+            else{failed++;failureCode=code;}
+        }
+        j.put("sentParts",sent).put("failedParts",failed).put("pendingParts",Math.max(0,parts-received));
+        if(received==0&&!"sending".equals(j.optString("state")))return; // Keep local permission/preflight errors.
+        if(received<parts&&now-j.optLong("createdAt")<=120000){
+            j.put("state","sending").put("error",failed>0?"일부 분할 문자에 오류가 있어요. 나머지 전송 결과를 기다리고 있어요.":"");
+        }else if(failed>0){
+            j.put("state",sent>0?"partial":"failed").put("error",reason(failureCode));
+        }else if(parts>0&&sent==parts){
+            j.put("state","sent").put("error","");
+        }else if(legacy>0){
+            j.put("state","unknown").put("error","이전 버전에서 발송 결과를 정확히 기록하지 못했어요. 실제 수신 여부를 확인해 주세요.");
+        }else if(now-j.optLong("createdAt")>120000){
+            j.put("state","unknown").put("error","발송 결과 응답이 없어요. 수신 여부를 확인해 주세요.");
+        }
     }
     private static String reason(int code){
         if(code==SmsManager.RESULT_ERROR_NO_SERVICE)return "통신 서비스에 연결되어 있지 않아요.";
@@ -160,23 +189,21 @@ public final class SmsOutbox {
         if(code==SmsManager.RESULT_ERROR_NULL_PDU)return "문자 내용을 전송 데이터로 만들지 못했어요.";
         return "통신사가 발송 실패를 반환했어요. 일부 분할 문자는 도착했을 수 있어요. (코드 "+code+")";
     }
-    private static boolean legacyUnknown(JSONObject job){
-        if(job.optInt("resultVersion")>=2||!"failed".equals(job.optString("state")))return false;
-        JSONObject results=job.optJSONObject("results");
-        if(results==null||results.length()==0)return false;
-        java.util.Iterator<String> keys=results.keys();
-        while(keys.hasNext())if(results.optInt(keys.next(),Integer.MIN_VALUE)!=0)return false;
-        return true;
-    }
     public static JSONObject logs(Context c) throws Exception {
-        synchronized(LOCK){JSONArray jobs=read(c),recent=new JSONArray();for(int i=jobs.length()-1;i>=Math.max(0,jobs.length()-200);i--){JSONObject j=new JSONObject(jobs.getJSONObject(i).toString());if("sending".equals(j.optString("state"))&&System.currentTimeMillis()-j.optLong("createdAt")>120000)j.put("state","unknown").put("error","발송 결과 응답이 없어요. 수신 여부를 확인해 주세요.");if(legacyUnknown(j))j.put("state","unknown").put("error","이전 버전에서 발송 결과를 정확히 기록하지 못했어요. 실제 수신 여부를 확인해 주세요.");recent.put(j);}return new JSONObject().put("ok",true).put("jobs",recent);}
+        synchronized(LOCK){
+            JSONArray jobs=read(c),recent=new JSONArray();
+            for(int i=jobs.length()-1;i>=Math.max(0,jobs.length()-200);i--){
+                JSONObject j=new JSONObject(jobs.getJSONObject(i).toString());summarize(j,System.currentTimeMillis());recent.put(j);
+            }
+            return new JSONObject().put("ok",true).put("jobs",recent);
+        }
     }
     public static void retry(Context c,StateReader reader,String oldId) throws Exception {
         JSONObject state=reader.read();
         if(state==null)throw new Exception("설정 변경으로 재전송 요청이 취소됐어요.");
         JSONObject retry=null;
         synchronized(LOCK){JSONArray jobs=read(c);JSONObject old=null;for(int i=0;i<jobs.length();i++)if(oldId.equals(jobs.getJSONObject(i).getString("id")))old=jobs.getJSONObject(i);
-            if(old==null||!("failed".equals(old.optString("state"))||"unknown".equals(old.optString("state"))||("sending".equals(old.optString("state"))&&System.currentTimeMillis()-old.optLong("createdAt")>120000)))throw new Exception("다시 보낼 수 있는 기록이 아니에요.");
+            if(old==null||!("failed".equals(old.optString("state"))||"partial".equals(old.optString("state"))||"unknown".equals(old.optString("state"))||("sending".equals(old.optString("state"))&&System.currentTimeMillis()-old.optLong("createdAt")>120000)))throw new Exception("다시 보낼 수 있는 기록이 아니에요.");
             if(!today().equals(old.getString("date")))throw new Exception("지난 날짜의 문자는 다시 보내지 않아요.");
             JSONObject config=state.getJSONObject("settings").getJSONObject("sms");
             if(!config.optBoolean("enabled"))throw new Exception("문자 자동 발송을 먼저 켜 주세요.");
@@ -187,6 +214,8 @@ public final class SmsOutbox {
             for(int i=0;i<jobs.length();i++){JSONObject j=jobs.getJSONObject(i);if(old.getString("key").equals(j.getString("key"))&&!oldId.equals(j.getString("id"))&&!"cancelled".equals(j.optString("state"))&&j.optLong("createdAt")>=old.optLong("createdAt"))throw new Exception("이미 재전송한 기록이에요. 최신 결과를 확인해 주세요.");}
             retry=new JSONObject(old.toString()).put("id",UUID.randomUUID().toString()).put("createdAt",System.currentTimeMillis()).put("state","sending").put("error","").put("resultVersion",2).put("parts",0).put("results",new JSONObject());jobs.put(retry);write(c,jobs);
         }
-        if(transmit(c,retry,reader)<0)throw new Exception("설정 또는 출결·수신 대상이 변경되어 재전송을 취소했어요.");
+        int outcome=transmit(c,retry,reader);
+        if(outcome<0)throw new Exception("설정 또는 출결·수신 대상이 변경되어 재전송을 취소했어요.");
+        if(outcome==0)throw new Exception("재전송 요청을 완료하지 못했어요. 문자 발송 기록에서 원인을 확인해 주세요.");
     }
 }

@@ -11,7 +11,7 @@ SOURCES = {
 "android/content/pm/PackageManager.java": """package android.content.pm; public class PackageManager { public static final String FEATURE_TELEPHONY="phone",FEATURE_TELEPHONY_MESSAGING="sms"; public static final int PERMISSION_GRANTED=0; public boolean hasSystemFeature(String s){return true;} }""",
 "android/content/Context.java": """package android.content;
 import java.io.File; import android.content.pm.PackageManager;
-public class Context { private final File dir; public Context(File d){dir=d;} public File getFilesDir(){return dir;} public Context getApplicationContext(){return this;} public String getPackageName(){return "test";} public PackageManager getPackageManager(){return new PackageManager();} public int checkSelfPermission(String p){return 0;} }""",
+public class Context { public int permission=0; private final File dir; public Context(File d){dir=d;} public File getFilesDir(){return dir;} public Context getApplicationContext(){return this;} public String getPackageName(){return "test";} public PackageManager getPackageManager(){return new PackageManager();} public int checkSelfPermission(String p){return permission;} }""",
 "android/net/Uri.java": """package android.net; public class Uri { public static Uri parse(String s){return new Uri();} }""",
 "android/content/Intent.java": """package android.content;
 import java.util.HashMap; import android.net.Uri;
@@ -80,6 +80,26 @@ public class NativeSmsTest {
   c=context(root,"zero");reader=new Reader(fixture(1));SmsOutbox.send(c,reader,changes());callback(c,0,0,0);
   check(latest(c).getString("state").equals("failed"),"new real zero result not relabeled as legacy");
 
+  c=context(root,"partial");reader=new Reader(fixture(1));SmsManager.partCount=3;
+  SmsOutbox.send(c,reader,changes());callback(c,0,2,4);
+  check(latest(c).getString("state").equals("sending"),"failed part must wait for remaining callbacks");
+  try{SmsOutbox.retry(c,reader,latest(c).getString("id"));throw new AssertionError("early retry accepted");}catch(Exception expected){}
+  callback(c,0,0,-1);callback(c,0,1,-1);
+  check(latest(c).getString("state").equals("partial"),"mixed results reported as partial failure");
+  check(latest(c).getInt("sentParts")==2&&latest(c).getInt("failedParts")==1,"part counts");
+  callback(c,0,1,-1);check(latest(c).getInt("sentParts")==2,"duplicate callback does not double count");
+  SmsOutbox.retry(c,reader,latest(c).getString("id"));check(SmsManager.sent.size()==2,"explicit retry accepted after all callbacks");
+  c=context(root,"late");reader=new Reader(fixture(1));SmsManager.partCount=2;SmsOutbox.send(c,reader,changes());callback(c,0,1,-1);
+  Path lateFile=c.getFilesDir().toPath().resolve("sms-outbox-v1.json");JSONArray lateJobs=new JSONArray(Files.readString(lateFile));
+  lateJobs.getJSONObject(0).put("createdAt",System.currentTimeMillis()-180000);Files.writeString(lateFile,lateJobs.toString());
+  check(latest(c).getString("state").equals("unknown"),"timeout is uncertain, not a known failure");
+  callback(c,0,0,-1);check(latest(c).getString("state").equals("sent"),"late success resolves uncertainty");
+  check(SmsManager.sent.size()==1,"no automatic resend");
+  c=context(root,"retry-permission");reader=new Reader(fixture(1));SmsOutbox.send(c,reader,changes());callback(c,0,0,4);
+  String failedId=latest(c).getString("id");c.permission=-1;
+  try{SmsOutbox.retry(c,reader,failedId);throw new AssertionError("failed retry reported as accepted");}catch(Exception expected){check(expected.getMessage().contains("완료하지 못"),"retry error visible");}
+  check(SmsManager.sent.size()==1&&latest(c).getString("state").equals("failed"),"no modem send after revoked permission");
+
   for(String mode:new String[]{"disable","epoch","optout","status","archive","note"}){
    c=context(root,mode);final Reader current=new Reader(fixture(2));
    SmsManager.onSend=()->{
@@ -109,7 +129,7 @@ public class NativeSmsTest {
   JSONArray jobs=new JSONArray(Files.readString(journal));jobs.getJSONObject(0).remove("resultVersion");Files.writeString(journal,jobs.toString());
   check(latest(c).getString("state").equals("unknown"),"legacy detached result is uncertain, not known failure");
   check(latest(c).getString("error").contains("이전 버전"),"legacy result explains uncertainty");
-  System.out.println("Native SMS passed: async success/failure, multipart, legacy logs, bulk cancellation, opt-out, status, note-only edits and dedup.");
+  System.out.println("Native SMS passed: async success/failure, out-of-order multipart/partial, duplicate/late callbacks, timeout, retry failure, legacy logs, bulk cancellation, opt-out and dedup.");
  }
 }"""
 }
@@ -133,7 +153,7 @@ def main():
         files += [str(production / name) for name in ("SmsOutbox.java", "SmsRules.java", "SmsResultReceiver.java")]
         classes = base / "classes"
         classes.mkdir()
-        subprocess.run(["javac", "-encoding", "UTF-8", "-cp", str(jar), "-d", str(classes), *files], check=True)
+        subprocess.run(["java", "-m", "jdk.compiler/com.sun.tools.javac.Main", "-encoding", "UTF-8", "-cp", str(jar), "-d", str(classes), *files], check=True)
         import os
         subprocess.run(["java", "-cp", os.pathsep.join((str(classes), str(jar))), "NativeSmsTest", str(base / "data")], check=True)
 

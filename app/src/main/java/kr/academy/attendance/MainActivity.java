@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.Manifest;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.content.res.Configuration;
 import android.database.Cursor;
 import android.graphics.Color;
 import android.net.Uri;
@@ -49,6 +50,8 @@ public final class MainActivity extends Activity {
     private JSONObject savedSnapshot;
     private long smsEpoch;
     private WebView webView;
+    private FrameLayout root;
+    private volatile String themeMode="system";
     private AtomicFile dataFile;
     private byte[] pendingExport;
     private boolean pickerOpen;
@@ -57,7 +60,9 @@ public final class MainActivity extends Activity {
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         dataFile = new AtomicFile(new File(getFilesDir(), "attendance-v1.json"));
-        FrameLayout root = new FrameLayout(this);
+        try { themeMode = readSnapshot().getJSONObject("settings").optString("theme", "system"); } catch (Exception ignored) {}
+        setTheme(isDarkTheme() ? R.style.AppThemeDark : R.style.AppTheme);
+        root = new FrameLayout(this);
         root.setBackgroundColor(Color.rgb(245, 246, 248));
         webView = new WebView(this);
         webView.setBackgroundColor(Color.rgb(245, 246, 248));
@@ -79,7 +84,10 @@ public final class MainActivity extends Activity {
             root.setFitsSystemWindows(true);
             getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
         }
+        applyNativeTheme();
+        if (Build.VERSION.SDK_INT >= 29) webView.setForceDarkAllowed(false);
         WebSettings settings = webView.getSettings();
+        if (Build.VERSION.SDK_INT >= 33) settings.setAlgorithmicDarkeningAllowed(false);
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
         settings.setAllowFileAccess(false);
@@ -110,6 +118,33 @@ public final class MainActivity extends Activity {
         }
     }
 
+    private boolean systemDark() {
+        return (getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
+    }
+    private boolean isDarkTheme() { return "dark".equals(themeMode) || !"light".equals(themeMode) && systemDark(); }
+    private void applyNativeTheme() {
+        boolean dark=isDarkTheme();
+        int background=Color.parseColor(dark?"#12131B":"#F5F6F8");
+        int surface=Color.parseColor(dark?"#1D1F2B":"#FFFFFF");
+        if(root!=null)root.setBackgroundColor(background);
+        if(webView!=null)webView.setBackgroundColor(background);
+        getWindow().setStatusBarColor(background);
+        getWindow().setNavigationBarColor(surface);
+        if(Build.VERSION.SDK_INT>=30){
+            WindowInsetsController controller=getWindow().getInsetsController();
+            int flags=WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS|WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
+            if(controller!=null)controller.setSystemBarsAppearance(dark?0:flags,flags);
+        }else{
+            View decor=getWindow().getDecorView();
+            int flags=View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR|View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+            decor.setSystemUiVisibility(dark?decor.getSystemUiVisibility()&~flags:decor.getSystemUiVisibility()|flags);
+        }
+    }
+    @Override public void onConfigurationChanged(Configuration config){
+        super.onConfigurationChanged(config);
+        applyNativeTheme();
+        if(webView!=null)webView.evaluateJavascript("window.AttendanceApp&&window.AttendanceApp.onResume()",null);
+    }
     private WebResourceResponse blocked() {
         return new WebResourceResponse("text/plain", "UTF-8", 403, "Blocked", null, new ByteArrayInputStream(new byte[0]));
     }
@@ -157,6 +192,8 @@ public final class MainActivity extends Activity {
                     value.getJSONObject("settings");
                     out = dataFile.startWrite(); out.write(bytes); dataFile.finishWrite(out);
                     savedSnapshot = value;
+                    themeMode = value.getJSONObject("settings").optString("theme", "system");
+                    runOnUiThread(() -> applyNativeTheme());
                     // Disable invalidates pending requests even if immediately enabled again.
                     if (!value.getJSONObject("settings").getJSONObject("sms").optBoolean("enabled")) smsEpoch++;
                     return envelope(true, "");
@@ -188,6 +225,7 @@ public final class MainActivity extends Activity {
         @JavascriptInterface public String deviceInfo(){
             // A missing SIM must never erase independently verified permission grants.
             JSONObject info=new JSONObject();
+            try{info.put("systemDark",systemDark());}catch(Exception ignored){}
             try{info.put("contactsGranted",checkSelfPermission(Manifest.permission.READ_CONTACTS)==PackageManager.PERMISSION_GRANTED);}catch(Exception ignored){}
             try{info.put("smsGranted",checkSelfPermission(Manifest.permission.SEND_SMS)==PackageManager.PERMISSION_GRANTED);}catch(Exception ignored){}
             try{info.put("smsCapable",SmsOutbox.capable(MainActivity.this));}catch(Exception ignored){}
@@ -305,6 +343,7 @@ public final class MainActivity extends Activity {
     }
     @Override protected void onResume() {
         super.onResume();
+        applyNativeTheme();
         if (webView != null) webView.evaluateJavascript("window.AttendanceApp&&window.AttendanceApp.onResume()", null);
     }
     @Override protected void onDestroy() {

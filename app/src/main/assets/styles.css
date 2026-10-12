@@ -8,3 +8,37 @@
 .sms-status-options .toggle{gap:6px;font-size:12px;white-space:nowrap}.sms-status-options input{width:18px;height:18px;flex:0 0 18px;margin:0}
 
 [hidden]{display:none!important}
+
+/* Explicit palettes keep attendance states and form controls legible in both modes. */
+:root{color-scheme:light;--surface:#fff;--field:#f9f8fb;--subtle:#f5f3f8}
+:root[data-theme=dark]{color-scheme:dark;--bg:#12131b;--ink:#f0eef9;--muted:#b1abc3;--line:#343343;--accent:#b6a5ff;--soft:#302841;--green:#6cdbb0;--red:#ff99a8;--amber:#f4c473;--surface:#1d1f2b;--field:#252632;--subtle:#292a38;--ring-track:#443956;--ring-fill:#b6a5ff}
+.theme-options{display:grid;gap:10px;margin:18px 0}.theme-choice{display:flex;align-items:center;gap:13px;min-height:76px;padding:15px;border:1px solid var(--line);border-radius:16px;background:var(--field);cursor:pointer}.theme-choice input{width:20px;height:20px;accent-color:var(--accent);flex-shrink:0}.theme-choice b,.theme-choice small{display:block}.theme-choice small{color:var(--muted);margin-top:4px}.theme-choice:focus-within{outline:2px solid var(--accent);outline-offset:2px}
+:root[data-theme=dark] :is(.icon-button,.date-field,.student-card,.empty,.white-card,.settings-card,.class-row,.calendar,.modal,.day-pill.today:not(.active),.chip){background:var(--surface)}
+:root[data-theme=dark] .primary,:root[data-theme=dark] .brand-mark{background:#7560c2;color:#fff}
+:root[data-theme=dark] .day-pill.active{background:#7056c1;color:#eee8ff}
+:root[data-theme=dark] :is(.avatar,.student-avatar,.settings-icon,.contact-import-card,.sms-preview,.label-pill,.token-list button){background:var(--soft);color:var(--accent)}
+:root[data-theme=dark] :is(.day-pill b,.hero-number,.hero-stat b,.student-contacts b,.detail-stats b,.contact-import-card b){color:var(--ink)}
+:root[data-theme=dark] :is(.local-badge,.toggle,.student-info p,.student-meta,.record-note,.hint,.settings-label small,.settings-title,.class-row small,.calendar-head div,.calendar-legend,.history-row small,.field>span,.field small,.modal-copy,.detail-stats div,.check-row,.contact-import-card small,.student-contacts,.student-contacts small,.guardian-candidates small,.sms-switch small,.sms-preview small,.sms-message,.saving-footer){color:var(--muted)}
+:root[data-theme=dark] .hero{background:#29233c}
+:root[data-theme=dark] :is(.hero-label,.hero-caption,.hero-number span,.hero-stat){color:#bdb1d8}
+:root[data-theme=dark] .hero-stats{border-color:#463954}
+:root[data-theme=dark] .hero-stat.green b{color:var(--green)}:root[data-theme=dark] .hero-stat.red b{color:var(--red)}:root[data-theme=dark] .hero-stat.amber b{color:var(--amber)}
+:root[data-theme=dark] .ring-wrap b{color:var(--accent)}
+:root[data-theme=dark] .chip.active{background:#504167;color:#fff}
+:root[data-theme=dark] :is(.search-box,.status-button,.modal-header .icon-button,.weekday-select span,.student-contacts){background:var(--subtle);color:var(--muted)}
+:root[data-theme=dark] :is(.field input,.field select,.field textarea,.guardian-card .field input){background:var(--field);border-color:var(--line);color:var(--ink)}
+:root[data-theme=dark] :is(.guardian-card,.candidate-card){background:#22212e;border-color:var(--line)}
+:root[data-theme=dark] .guardian-card select{background:var(--soft);color:var(--accent)}
+:root[data-theme=dark] :is(.status-button.selected.present,.sms-state.sent,.status-label.present){background:#193b32;color:var(--green)}
+:root[data-theme=dark] :is(.status-button.selected.late,.status-label.late){background:#45351f;color:var(--amber)}
+:root[data-theme=dark] :is(.status-button.selected.absent,.danger-button,.form-error,.status-label.absent){background:#43252e;color:var(--red)}
+:root[data-theme=dark] :is(.status-button.selected.excused,.calendar-day.has-record,.sms-state,.status-label,.welcome-step b){background:var(--soft);color:var(--accent)}
+:root[data-theme=dark] :is(.notice,.sms-state.unknown,.sms-state.partial){background:#42351f;color:#f2cd8b}
+:root[data-theme=dark] .sms-state.failed{background:#43252e;color:var(--red)}
+:root[data-theme=dark] .sms-log-card{border-color:var(--line)}
+:root[data-theme=dark] .nav{background:#1d1f2bf2;border-color:var(--line)}
+:root[data-theme=dark] .nav button{color:var(--muted)}:root[data-theme=dark] .nav button.active{color:var(--accent)}
+:root[data-theme=dark] .modal-backdrop{background:#0009}
+:root[data-theme=dark] .calendar-day.future{color:#777286}
+:root[data-theme=dark] .sms-state.cancelled{background:var(--subtle);color:var(--muted)}
+.sms-state.partial{background:#fff0eb;color:#a5683f}.sms-state.failed{background:#ffeaec;color:#b83e4e}
