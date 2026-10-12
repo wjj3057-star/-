@@ -2,7 +2,7 @@
   'use strict';
   const A=window.AttendanceApp,C=window.AttendanceCore,N=window.NativeAttendance||null,e=A.escape,$=s=>document.querySelector(s);
   const relations={mother:'어머니',father:'아버지',guardian:'보호자',student:'학생'};
-  let contactMode=null,contacts=[],candidates=[],scanToken='',guardianSequence=0,contactAwaitingPermission=false;
+  let contactMode=null,contacts=[],candidates=[],scanToken='',guardianSequence=0,contactAwaitingPermission=false,contactLimit=100;
   const state=()=>A.getState();
   function device(){try{return N&&N.deviceInfo?JSON.parse(N.deviceInfo()):{smsGranted:false,smsCapable:false,simReady:false};}catch(_){return {};}}
   function smsProblem(info=device()){
@@ -52,7 +52,8 @@
   function requestContacts(mode){
     if(!N||!N.loadContacts){A.toast('연락처 연동은 설치된 Android 앱에서 사용할 수 있어요.');return;}
     contactMode=mode;contactAwaitingPermission=false;scanToken=C.uid();
-    N.loadContacts(scanToken);
+    contactLimit=100;
+    try{N.loadContacts(scanToken);}catch(_){onContacts({requestId:scanToken,ok:false,error:'연락처 요청을 전달하지 못했어요. 다시 불러와 주세요.'});}
   }
   function openPicker(target){
     const form=$('#modal-root form');if(!form)return;
@@ -67,7 +68,7 @@
     const target=$('#contact-results');if(!target)return;
     const q=query.trim().toLowerCase(),digits=query.replace(/\D/g,'');
     const list=contacts.map((c,index)=>({...c,index})).filter(c=>!q||c.name.toLowerCase().includes(q)||(digits&&c.phone.includes(digits)));
-    target.innerHTML=list.length?`<p class="hint">${list.length}개 번호 · 최대 100개씩 표시해요</p>${list.slice(0,100).map(c=>`<button type="button" class="settings-row" data-contact-action="contact-select" data-index="${c.index}"><span class="settings-label"><b>${e(c.name)}</b><small>${e(c.phone)}</small></span>${A.icon('right')}</button>`).join('')}`:'<p class="hint">일치하는 연락처가 없어요.</p>';
+    target.innerHTML=list.length?`<p class="hint">${list.length}개 번호 · ${Math.min(contactLimit,list.length)}개 표시 중</p>${list.slice(0,contactLimit).map(c=>`<button type="button" class="settings-row" data-contact-action="contact-select" data-index="${c.index}"><span class="settings-label"><b>${e(c.name)}</b><small>${e(c.phone)}</small></span>${A.icon('right')}</button>`).join('')}${list.length>contactLimit?'<button type="button" class="secondary full" data-contact-action="contacts-more">연락처 더 보기</button>':''}`:'<p class="hint">일치하는 연락처가 없어요.</p>';
   }
   function selectContact(index){
     const c=contacts[index],mode=contactMode,form=$('#modal-root form');if(!c||!mode||!form)return;
@@ -104,7 +105,7 @@
   }
   function keywordsForm(){
     const keywords=state().settings.contactKeywords;
-    A.modal('연락처 인식 키워드',`<form>${Object.keys(C.DEFAULT_KEYWORDS).map(role=>`<label class="field"><span>${relations[role]} 키워드</span><input name="${role}" maxlength="300" value="${e(keywords[role].join(', '))}"><small>쉼표로 구분해요. 이름 앞 또는 뒤의 단어를 인식해요.</small></label>`).join('')}<p class="hint">예: 김하늘 어머니 / 김하늘(어머니) / (김하늘)어머니<br>키워드가 없는 ‘김하늘’ 연락처는 인식된 학생 이름과 정확히 일치할 때 학생 번호 후보로 표시돼요.</p><div id="form-error" class="form-error" role="alert"></div><div class="modal-actions"><button type="button" class="secondary" data-action="close">취소</button><button type="submit" class="primary">키워드 저장</button></div></form>`,fd=>{
+    A.modal('연락처 인식 키워드',`<form>${Object.keys(C.DEFAULT_KEYWORDS).map(role=>`<label class="field"><span>${relations[role]} 키워드</span><input name="${role}" maxlength="438" value="${e(keywords[role].join(', '))}"><small>쉼표로 구분해요. 이름 앞 또는 뒤의 단어를 인식해요.</small></label>`).join('')}<p class="hint">예: 김하늘 어머니 / 김하늘(어머니) / (김하늘)어머니<br>키워드가 없는 ‘김하늘’ 연락처는 인식된 학생 이름과 정확히 일치할 때 학생 번호 후보로 표시돼요.</p><div id="form-error" class="form-error" role="alert"></div><div class="modal-actions"><button type="button" class="secondary" data-action="close">취소</button><button type="submit" class="primary">키워드 저장</button></div></form>`,fd=>{
       const next=C.clone(state()),kw={},all=[];
       for(const key of Object.keys(C.DEFAULT_KEYWORDS)){kw[key]=String(fd.get(key)||'').split(',').map(s=>s.trim()).filter(Boolean);if(!kw[key].length||kw[key].length>20||kw[key].some(s=>s.length>20))return A.formError('각 항목은 1~20개, 단어마다 20자 이내로 입력해 주세요.');all.push(...kw[key]);}
       if(new Set(all).size!==all.length)return A.formError('관계마다 서로 다른 키워드를 사용해 주세요.');next.settings.contactKeywords=kw;
@@ -171,7 +172,7 @@
     if(!result.ok)return `<p class="notice">${e(result.error)}</p>`;
     if(!result.jobs.length)return '<p class="hint">아직 발송 기록이 없어요. 출석 문자 설정을 켜고 오늘 출석을 체크해 주세요.</p>';
     const labels={sending:'결과 대기',sent:'발송 완료',failed:'발송 실패',partial:'일부 발송 실패',unknown:'결과 미확인',cancelled:'발송 취소'};
-    return result.jobs.map(j=>`<article class="sms-log-card"><div class="row between"><b>${e(j.studentName)} · ${C.LABELS[j.attendanceStatus]||''}</b><span class="sms-state ${e(j.state)}">${labels[j.state]||'확인 필요'}</span></div><p class="hint">${e(j.guardianName)} · ${e(j.phone)}<br>${e(new Date(j.createdAt).toLocaleString('ko-KR'))} · ${j.parts||0}개 SMS 분량${j.parts?` · 성공 ${j.sentParts||0} / 실패 ${j.failedParts||0} / 대기 ${j.pendingParts||0}`:''}</p><p class="sms-message">${e(j.message)}</p>${j.error?`<p class="${j.state==='failed'||j.state==='partial'?'form-error visible':'notice'}">${e(j.error)}</p>`:''}${['failed','partial','unknown'].includes(j.state)&&j.date===C.localDate()?`<button class="text-button" data-contact-action="retry" data-id="${e(j.id)}">이 문자 다시 보내기</button>`:''}</article>`).join('');
+    return result.jobs.map(j=>`<article class="sms-log-card"><div class="row between"><b>${e(j.studentName)} · ${C.LABELS[j.attendanceStatus]||''}</b><span class="sms-state ${e(j.state)}">${labels[j.state]||'확인 필요'}</span></div><p class="hint">${e(j.guardianName)} · ${e(j.phone)}<br>${e(new Date(j.createdAt).toLocaleString('ko-KR'))} · ${j.parts||0}개 SMS 분량${j.parts?` · 성공 ${j.sentParts||0} / 실패 ${j.failedParts||0} / 대기 ${j.pendingParts||0}`:''}</p><p class="sms-message">${e(j.message)}</p>${j.error?`<p class="${j.state==='failed'||j.state==='partial'?'form-error visible':'notice'}">${e(j.error)}</p>`:''}${['failed','partial','unknown'].includes(j.state)&&j.date===C.localDate()&&j.canRetry!==false?`<button class="text-button" data-contact-action="retry" data-id="${e(j.id)}">이 문자 다시 보내기</button>`:j.retryUnavailableReason&&j.state!=='sent'?`<p class="hint">${e(j.retryUnavailableReason)}</p>`:''}</article>`).join('');
   }
   function refreshLogs(){
     const target=$('#sms-logs');if(!target)return;
@@ -193,7 +194,7 @@
   }
   function onContacts(result){
     if(!contactMode||result.requestId!==scanToken)return;
-    if(!result.ok){contactAwaitingPermission=!device().contactsGranted;const scan=$('[data-contact-action=scan]');if(scan)scan.disabled=false;const target=$('#contact-results')||$('#scan-state');if(target)target.innerHTML=`<p class="notice">${e(result.error)}</p><button class="text-button" data-contact-action="app-settings" data-permission-needed="contacts">앱 권한 설정 열기</button>`;else A.toast(result.error);return;}
+    if(!result.ok){contactAwaitingPermission=!device().contactsGranted;const scan=$('[data-contact-action=scan]');if(scan)scan.disabled=false;const target=$('#contact-results')||$('#scan-state');if(target)target.innerHTML=`<p class="notice">${e(result.error)}</p><button class="text-button" data-contact-action="app-settings" data-permission-needed="contacts">앱 권한 설정 열기</button><button type="button" class="secondary small-button" data-contact-action="contacts-retry">다시 불러오기</button>`;else A.toast(result.error);for(const button of document.querySelectorAll('[data-permission-needed=contacts]'))button.hidden=device().contactsGranted===true;return;}
     contactAwaitingPermission=false;contacts=result.contacts||[];if(contactMode.kind==='picker')showContactList($('#contact-search')?.value||'');else{contactMode=null;scanToken='';showCandidates();}if(result.truncated)A.toast('연락처가 많아 처음 20,000개 번호를 표시했어요.');
   }
   function onPermission(info){refreshPermissions(info);}
@@ -203,6 +204,10 @@
     const action=b.dataset.contactAction;
     if(action==='pick')openPicker(b.dataset.target);
     else if(action==='picker-back')closePicker();
+    else if(action==='contacts-more'){
+      const modal=$('.modal'),scroll=modal.scrollTop;contactLimit+=100;showContactList($('#contact-search')?.value||'');modal.scrollTop=scroll;
+    }
+    else if(action==='contacts-retry'&&contactMode){b.disabled=true;requestContacts(contactMode);}
     else if(action==='contact-select')selectContact(Number(b.dataset.index));
     else if(action==='add-guardian'){const target=$('#guardian-fields');if(target.querySelectorAll('[data-guardian]').length>=6)return A.toast('학부모 연락처는 최대 6개까지 추가할 수 있어요.');target.insertAdjacentHTML('beforeend',guardianCard());}
     else if(action==='remove-guardian')b.closest('[data-guardian]').remove();
@@ -219,7 +224,7 @@
     else if(action==='retry'){const problem=smsProblem();if(problem)return A.toast(problem);const id=b.dataset.id;A.confirmDialog('같은 문자를 다시 보낼까요?','일부 분할 문자가 이미 도착했을 수 있어요. 수신 여부를 확인한 경우에만 다시 보내 주세요. 추가 문자 요금이 발생할 수 있어요.','다시 보내기',()=>{N.retrySms(id);smsLog();});}
   });
   document.addEventListener('change',ev=>{if(ev.target.name==='statuses'&&ev.target.closest('#sms-settings-form'))toggleSmsStatus(ev.target);else if(ev.target.name?.startsWith('g-notify-'))toggleGuardian(ev.target);});
-  document.addEventListener('input',ev=>{if(ev.target.id==='contact-search')showContactList(ev.target.value);if(ev.target.id==='sms-template')updatePreview();});
+  document.addEventListener('input',ev=>{if(ev.target.id==='contact-search'){contactLimit=100;showContactList(ev.target.value);}if(ev.target.id==='sms-template')updatePreview();});
   setInterval(()=>{if(!document.hidden)refreshLogs();},3000);
   window.ContactSms={fields,readFields,details,studentTools,settingsHTML,afterAttendanceSave,onContacts,onPermission,onSmsQueue,onResume:()=>{refreshPermissions();refreshLogs();},handleBack:closePicker,onModalReplace:()=>{contactAwaitingPermission=false;contactMode=null;scanToken='';},onClose:()=>{contactAwaitingPermission=false;contactMode=null;scanToken='';contacts=[];candidates=[];}};
   A.render();

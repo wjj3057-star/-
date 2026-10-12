@@ -33,19 +33,20 @@ public class PendingIntent { public static final int FLAG_UPDATE_CURRENT=1,FLAG_
 import java.util.*; import android.app.PendingIntent;
 public class SmsManager {
  public static final int RESULT_ERROR_NO_SERVICE=4,RESULT_ERROR_RADIO_OFF=2,RESULT_ERROR_LIMIT_EXCEEDED=5,RESULT_ERROR_NULL_PDU=3;
- public static final List<ArrayList<PendingIntent>> sent=new ArrayList<>(); public static Runnable onSend; public static int partCount=1;
+ public static final List<ArrayList<PendingIntent>> sent=new ArrayList<>(); public static Runnable onSend; public static int partCount=1,preparationFailures=0; public static boolean failAfterHandoff=false;
  public static SmsManager getSmsManagerForSubscriptionId(int i){return new SmsManager();}
- public ArrayList<String> divideMessage(String m){ArrayList<String> p=new ArrayList<>();for(int i=0;i<partCount;i++)p.add(m);return p;}
- public void sendMultipartTextMessage(String p,String sc,ArrayList<String> text,ArrayList<PendingIntent> result,ArrayList<PendingIntent> delivery){sent.add(result);if(onSend!=null)onSend.run();}
+ public ArrayList<String> divideMessage(String m){if(preparationFailures>0){preparationFailures--;throw new IllegalStateException("SIM unavailable");}ArrayList<String> p=new ArrayList<>();for(int i=0;i<partCount;i++)p.add(m);return p;}
+ public void sendMultipartTextMessage(String p,String sc,ArrayList<String> text,ArrayList<PendingIntent> result,ArrayList<PendingIntent> delivery){sent.add(result);if(failAfterHandoff)throw new IllegalStateException("unknown modem result");if(onSend!=null)onSend.run();}
 }""",
 "android/util/AtomicFile.java": """package android.util;
 import java.io.*;
 public class AtomicFile {
- private final File file; public static Runnable afterWrite; public AtomicFile(File f){file=f;} public File getBaseFile(){return file;}
+ private final File file; public static Runnable afterWrite; public static boolean failWrites=false; public AtomicFile(File f){file=f;} public File getBaseFile(){return file;}
+ public InputStream openRead() throws IOException {return new FileInputStream(file);}
  public byte[] readFully() throws IOException {try(InputStream in=new FileInputStream(file)){return in.readAllBytes();}}
- public FileOutputStream startWrite() throws IOException {file.getParentFile().mkdirs();return new FileOutputStream(file);}
+ public FileOutputStream startWrite() throws IOException {if(failWrites)throw new IOException("Disk full");file.getParentFile().mkdirs();return new FileOutputStream(file);}
  public void finishWrite(FileOutputStream out) throws IOException {out.close();if(afterWrite!=null)afterWrite.run();}
- public void failWrite(FileOutputStream out) throws IOException {out.close();}
+ public void failWrite(FileOutputStream out) {try{out.close();}catch(IOException ignored){}}
 }""",
 "NativeSmsTest.java": r"""import kr.academy.attendance.*;
 import android.content.*; import android.telephony.SmsManager; import android.util.AtomicFile;
@@ -63,7 +64,7 @@ public class NativeSmsTest {
    .put("records",new JSONArray().put(new JSONObject().put("studentId","s").put("studentName","Student").put("className","All").put("date",SmsOutbox.today()).put("status","present").put("note","").put("time","16:00").put("updatedAt","2026-10-10T07:00:00Z")));
  }
  static JSONArray changes(){return new JSONArray().put(new JSONObject().put("studentId","s").put("date",SmsOutbox.today()).put("status","present"));}
- static Context context(Path root,String name)throws Exception{SmsManager.sent.clear();SmsManager.onSend=null;SmsManager.partCount=1;AtomicFile.afterWrite=null;return new Context(Files.createDirectories(root.resolve(name)).toFile());}
+ static Context context(Path root,String name)throws Exception{SmsManager.sent.clear();SmsManager.onSend=null;SmsManager.partCount=1;SmsManager.preparationFailures=0;SmsManager.failAfterHandoff=false;AtomicFile.afterWrite=null;AtomicFile.failWrites=false;return new Context(Files.createDirectories(root.resolve(name)).toFile());}
  static JSONObject latest(Context c)throws Exception{return SmsOutbox.logs(c).getJSONArray("jobs").getJSONObject(0);}
  static void callback(Context c,int message,int part,int code)throws Exception{
   SmsResultReceiver receiver=new SmsResultReceiver();receiver.setResultCode(code);
@@ -129,10 +130,55 @@ public class NativeSmsTest {
   JSONArray jobs=new JSONArray(Files.readString(journal));jobs.getJSONObject(0).remove("resultVersion");Files.writeString(journal,jobs.toString());
   check(latest(c).getString("state").equals("unknown"),"legacy detached result is uncertain, not known failure");
   check(latest(c).getString("error").contains("이전 버전"),"legacy result explains uncertainty");
+  c=context(root,"clock-order");reader=new Reader(fixture(1));SmsOutbox.send(c,reader,changes());callback(c,0,0,4);
+  Path clockFile=c.getFilesDir().toPath().resolve("sms-outbox-v1.json");JSONArray clockJobs=new JSONArray(Files.readString(clockFile));
+  clockJobs.getJSONObject(0).put("createdAt",System.currentTimeMillis()+3600000);Files.writeString(clockFile,clockJobs.toString());
+  SmsOutbox.retry(c,reader,latest(c).getString("id"));callback(c,1,0,4);
+  SmsOutbox.retry(c,reader,latest(c).getString("id"));check(SmsManager.sent.size()==3,"latest retry uses journal order, not wall clock");
+
+  c=context(root,"late-original-success");reader=new Reader(fixture(1));SmsOutbox.send(c,reader,changes());
+  Path successFile=c.getFilesDir().toPath().resolve("sms-outbox-v1.json");JSONArray successJobs=new JSONArray(Files.readString(successFile));
+  successJobs.getJSONObject(0).put("createdAt",System.currentTimeMillis()-180000);Files.writeString(successFile,successJobs.toString());
+  SmsOutbox.retry(c,reader,latest(c).getString("id"));callback(c,1,0,4);callback(c,0,0,-1);
+  check(!latest(c).optBoolean("canRetry",true),"a confirmed earlier success blocks a duplicate retry");
+  try{SmsOutbox.retry(c,reader,latest(c).getString("id"));throw new AssertionError("confirmed SMS retransmitted");}catch(Exception expected){}
+  check(SmsManager.sent.size()==2,"late success cannot cause a third send");
+  c=context(root,"prepare-failure");reader=new Reader(fixture(2));SmsManager.preparationFailures=1;
+  JSONObject preparationResult=SmsOutbox.send(c,reader,changes());
+  check(preparationResult.getInt("failed")==1&&preparationResult.getInt("queued")==1,"preflight exception does not abort remaining recipients");
+  check(SmsOutbox.logs(c).getJSONArray("jobs").getJSONObject(1).getString("state").equals("failed"),"preflight failure is not left pending");
+  c=context(root,"empty-parts");reader=new Reader(fixture(1));SmsManager.partCount=0;SmsOutbox.send(c,reader,changes());
+  check(latest(c).getString("state").equals("failed")&&SmsManager.sent.isEmpty(),"empty division never reaches modem");
+  c=context(root,"handoff-unknown");reader=new Reader(fixture(1));SmsManager.failAfterHandoff=true;SmsOutbox.send(c,reader,changes());
+  check(latest(c).getString("state").equals("unknown"),"a modem handoff exception is uncertain, not definite failure");
   System.out.println("Native SMS passed: async success/failure, out-of-order multipart/partial, duplicate/late callbacks, timeout, retry failure, legacy logs, bulk cancellation, opt-out and dedup.");
  }
 }"""
 }
+
+SOURCES["StoreTest.java"] = r"""import kr.academy.attendance.*;
+import android.content.Context;import android.util.AtomicFile;import org.json.*;import java.nio.file.*;
+public class StoreTest {
+ static void check(boolean ok,String message){if(!ok)throw new AssertionError(message);}
+ static JSONObject data(boolean enabled){return new JSONObject().put("schema",2).put("classes",new JSONArray()).put("students",new JSONArray()).put("records",new JSONArray()).put("settings",new JSONObject().put("theme","dark").put("sms",new JSONObject().put("enabled",enabled)));}
+ static boolean save(AttendanceStore store,JSONObject data){return new JSONObject(store.saveState(data.toString())).getBoolean("ok");}
+ public static void main(String[] args)throws Exception{
+  Path root=Paths.get(args[0]);Files.createDirectories(root);Context context=new Context(root.toFile());AttendanceStore store=AttendanceStore.get(context);
+  check(new JSONObject(store.readState()).getBoolean("ok"),"first launch is empty, not corrupt");check(save(store,data(true)),"initial save");
+  SmsOutbox.StateReader pending=store.smsStateReader();
+  AttendanceStore recreated=AttendanceStore.get(new Context(root.toFile()));
+  check(store==recreated,"Activities share one store and lock");check(save(recreated,data(false)),"disable after recreation");check(save(recreated,data(true)),"re-enable");check(pending.read()==null,"pending requests remain cancelled across Activity recreation");
+  check(recreated.smsStateReader().read().getJSONObject("settings").getJSONObject("sms").getBoolean("enabled"),"new requests see current settings");
+  Path file=root.resolve("attendance-v1.json");String previous=Files.readString(file);
+  JSONObject invalid=data(true);invalid.getJSONObject("settings").remove("sms");check(!save(store,invalid),"missing SMS settings rejected before write");check(Files.readString(file).equals(previous),"invalid save never overwrites durable state");
+  AtomicFile.failWrites=true;check(!save(store,data(false)),"write error reported");AtomicFile.failWrites=false;
+  check(Files.readString(file).equals(previous)&&store.smsStateReader().read().getJSONObject("settings").getJSONObject("sms").getBoolean("enabled"),"failed save retains file and active preferences");
+  check(store.theme().equals("dark"),"saved theme available before WebView startup");
+  Path broken=root.resolve("broken");Files.createDirectories(broken);Files.writeString(broken.resolve("attendance-v1.json"),"");
+  check(!new JSONObject(AttendanceStore.get(new Context(broken.toFile())).readState()).getBoolean("ok"),"empty existing file is not a fresh install");
+  System.out.println("Store passed: first run, durable save, recreation sharing, consent cancellation, invalid settings, write failure rollback and corrupt-file protection.");
+ }
+}"""
 
 def main():
     parser = argparse.ArgumentParser()
@@ -150,12 +196,13 @@ def main():
             target.write_text(content, encoding="utf-8")
             files.append(str(target))
         production = ROOT / "app/src/main/java/kr/academy/attendance"
-        files += [str(production / name) for name in ("SmsOutbox.java", "SmsRules.java", "SmsResultReceiver.java")]
+        files += [str(production / name) for name in ("SmsOutbox.java", "SmsRules.java", "SmsResultReceiver.java", "AttendanceStore.java")]
         classes = base / "classes"
         classes.mkdir()
         subprocess.run(["java", "-m", "jdk.compiler/com.sun.tools.javac.Main", "-encoding", "UTF-8", "-cp", str(jar), "-d", str(classes), *files], check=True)
         import os
         subprocess.run(["java", "-cp", os.pathsep.join((str(classes), str(jar))), "NativeSmsTest", str(base / "data")], check=True)
+        subprocess.run(["java", "-cp", os.pathsep.join((str(classes), str(jar))), "StoreTest", str(base / "store")], check=True)
 
 if __name__ == "__main__":
     main()

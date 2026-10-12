@@ -7,9 +7,10 @@ import java.util.regex.Pattern;
 /** Shared send-time rules with no Android dependency, so they can be tested on the JVM. */
 public final class SmsRules {
     private SmsRules() {}
+    private static final String SPACE = "\\s\\p{Zs}\\u2028\\u2029\\uFEFF";
     public static String phone(String raw) {
-        if (raw == null || !raw.matches("[+0-9\\s().-]*")) return "";
-        String value = raw.replaceAll("[\\s().-]", "");
+        if (raw == null || !raw.matches("[+0-9" + SPACE + "().-]*")) return "";
+        String value = raw.replaceAll("[" + SPACE + "().-]", "");
         if (value.startsWith("+82")) value = "0" + value.substring(3).replaceFirst("^0", "");
         return value.matches("\\+?[0-9]{8,15}") ? value : "";
     }

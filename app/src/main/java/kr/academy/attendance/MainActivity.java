@@ -12,7 +12,6 @@ import android.os.Build;
 import android.os.Bundle;
 import android.provider.ContactsContract;
 import android.provider.Settings;
-import android.util.AtomicFile;
 import android.view.View;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
@@ -28,9 +27,7 @@ import org.json.JSONObject;
 import org.json.JSONArray;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.io.File;
 import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
@@ -43,24 +40,21 @@ import java.util.concurrent.Executors;
 /** Local-only app shell; optional contacts and carrier SMS use Android permissions. */
 public final class MainActivity extends Activity {
     private static final String ORIGIN = "https://appassets.androidplatform.net";
-    private static final int EXPORT = 100, IMPORT = 101, CONTACT_PERMISSION = 110, SMS_PERMISSION = 111, MAX_BYTES = 24 * 1024 * 1024, MAX_FILE_BYTES = 25 * 1024 * 1024;
+    private static final int EXPORT = 100, IMPORT = 101, CONTACT_PERMISSION = 110, SMS_PERMISSION = 111, MAX_FILE_BYTES = 25 * 1024 * 1024;
     private final Set<String> assets = new HashSet<>(Arrays.asList("/index.html", "/styles.css", "/core.js", "/app.js", "/contacts-sms.js"));
     private final ExecutorService io = Executors.newSingleThreadExecutor();
-    private final Object stateLock = new Object();
-    private JSONObject savedSnapshot;
-    private long smsEpoch;
     private WebView webView;
     private FrameLayout root;
     private volatile String themeMode="system";
-    private AtomicFile dataFile;
+    private AttendanceStore store;
     private byte[] pendingExport;
     private boolean pickerOpen;
     private String pendingContactRequest="";
 
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        dataFile = new AtomicFile(new File(getFilesDir(), "attendance-v1.json"));
-        try { themeMode = readSnapshot().getJSONObject("settings").optString("theme", "system"); } catch (Exception ignored) {}
+        store = AttendanceStore.get(getApplicationContext());
+        themeMode = store.theme();
         setTheme(isDarkTheme() ? R.style.AppThemeDark : R.style.AppTheme);
         root = new FrameLayout(this);
         root.setBackgroundColor(Color.rgb(245, 246, 248));
@@ -148,11 +142,6 @@ public final class MainActivity extends Activity {
     private WebResourceResponse blocked() {
         return new WebResourceResponse("text/plain", "UTF-8", 403, "Blocked", null, new ByteArrayInputStream(new byte[0]));
     }
-    private static String envelope(boolean ok, String data) {
-        try { return new JSONObject().put("ok", ok).put("data", data).toString(); }
-        catch (Exception ignored) { return "{\"ok\":false}"; }
-    }
-    private static byte[] readLimited(InputStream input) throws Exception { return readLimited(input, MAX_BYTES); }
     private static byte[] readLimited(InputStream input, int limit) throws Exception {
         if (input == null) throw new FileNotFoundException();
         try (InputStream in = input; ByteArrayOutputStream out = new ByteArrayOutputStream()) {
@@ -165,40 +154,12 @@ public final class MainActivity extends Activity {
         }
     }
     public final class Bridge {
-        @JavascriptInterface public String readState() {
-            synchronized (stateLock) {
-                try {
-                    byte[] bytes = readLimited(dataFile.openRead());
-                    // Existing but empty files are corrupt, not first-run state.
-                    if (bytes.length == 0) return envelope(false, "");
-                    return envelope(true, new String(bytes, StandardCharsets.UTF_8));
-                }
-                catch (FileNotFoundException error) {
-                    boolean exists = dataFile.getBaseFile().exists() || new File(dataFile.getBaseFile() + ".bak").exists();
-                    return envelope(!exists, "");
-                }
-                catch (Exception error) { return envelope(false, ""); }
-            }
-        }
+        @JavascriptInterface public String readState() { return store.readState(); }
         @JavascriptInterface public String saveState(String json) {
-            synchronized (stateLock) {
-                FileOutputStream out = null;
-                try {
-                    if (json == null) return envelope(false, "");
-                    byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
-                    if (bytes.length > MAX_BYTES) return envelope(false, "");
-                    JSONObject value = new JSONObject(json);
-                    if (value.getInt("schema") != 2 || value.getJSONArray("students").length() > 5000 || value.getJSONArray("classes").length() > 201 || value.getJSONArray("records").length() > 100000) return envelope(false, "");
-                    value.getJSONObject("settings");
-                    out = dataFile.startWrite(); out.write(bytes); dataFile.finishWrite(out);
-                    savedSnapshot = value;
-                    themeMode = value.getJSONObject("settings").optString("theme", "system");
-                    runOnUiThread(() -> applyNativeTheme());
-                    // Disable invalidates pending requests even if immediately enabled again.
-                    if (!value.getJSONObject("settings").getJSONObject("sms").optBoolean("enabled")) smsEpoch++;
-                    return envelope(true, "");
-                } catch (Exception error) { if (out != null) dataFile.failWrite(out); return envelope(false, ""); }
-            }
+            String result=store.saveState(json);
+            themeMode=store.theme();
+            runOnUiThread(() -> applyNativeTheme());
+            return result;
         }
         @JavascriptInterface public void exportFile(String name, String mime, String content) {
             if (content == null || name == null || (!"application/json".equals(mime) && !"text/csv".equals(mime))) return;
@@ -247,7 +208,7 @@ public final class MainActivity extends Activity {
         @JavascriptInterface public void openAppSettings(){runOnUiThread(()->startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,Uri.parse("package:"+getPackageName()))));}
         @JavascriptInterface public void sendAttendanceSms(String raw){
             if(raw==null||raw.length()>2*1024*1024)return;
-            final SmsOutbox.StateReader reader=smsStateReader();
+            final SmsOutbox.StateReader reader=store.smsStateReader();
             io.execute(()->{try{
                 JSONArray changes=new JSONArray(raw);if(changes.length()>5000)throw new Exception("한 번에 처리할 학생이 너무 많아요.");
                 JSONObject result=SmsOutbox.send(getApplicationContext(),reader,changes);result.put("ok",true);addon("onSmsQueue",result);
@@ -256,25 +217,9 @@ public final class MainActivity extends Activity {
         @JavascriptInterface public String smsLogs(){try{return SmsOutbox.logs(MainActivity.this).toString();}catch(Exception e){return "{\"ok\":false,\"error\":\"문자 기록을 읽지 못했어요. 중복 방지를 위해 자동 발송을 중단합니다.\"}";}}
         @JavascriptInterface public void retrySms(String id){
             if(id==null||id.length()>80)return;
-            final SmsOutbox.StateReader reader=smsStateReader();
+            final SmsOutbox.StateReader reader=store.smsStateReader();
             io.execute(()->{try{SmsOutbox.retry(getApplicationContext(),reader,id);addon("onSmsQueue",new JSONObject().put("ok",true).put("message","재전송을 요청했어요. 문자 발송 기록에서 결과를 확인해 주세요."));}catch(Exception e){addonError("onSmsQueue",e.getMessage());}});
         }
-    }
-    private JSONObject readSnapshot() throws Exception {
-        synchronized(stateLock){
-            if(savedSnapshot==null)savedSnapshot=new JSONObject(new String(readLimited(dataFile.openRead()),StandardCharsets.UTF_8));
-            return savedSnapshot;
-        }
-    }
-    private SmsOutbox.StateReader smsStateReader(){
-        final long requestEpoch;
-        synchronized(stateLock){requestEpoch=smsEpoch;}
-        return new SmsOutbox.StateReader(){
-            public Object lock(){return stateLock;}
-            public JSONObject read() throws Exception {
-                synchronized(stateLock){return requestEpoch==smsEpoch?readSnapshot():null;}
-            }
-        };
     }
     private void addon(String method,JSONObject value){runOnUiThread(()->{if(!isFinishing()&&webView!=null)webView.evaluateJavascript("window.ContactSms&&window.ContactSms."+method+"("+value.toString()+")",null);});}
     private void addonError(String method,String error){try{addon(method,new JSONObject().put("ok",false).put("error",error==null?"요청을 처리하지 못했어요.":error));}catch(Exception ignored){}}
@@ -296,7 +241,7 @@ public final class MainActivity extends Activity {
                     }
                 }
                 result.put("ok",true).put("contacts",contacts).put("truncated",truncated);
-            }catch(Exception e){try{result.put("ok",false).put("error","연락처 권한을 허용했는지 확인해 주세요.");}catch(Exception ignored){}}
+            }catch(Exception e){try{result.put("ok",false).put("error",checkSelfPermission(Manifest.permission.READ_CONTACTS)!=PackageManager.PERMISSION_GRANTED?"연락처 권한을 허용했는지 확인해 주세요.":"연락처를 읽지 못했어요. 다시 불러오거나 번호를 직접 입력해 주세요.");}catch(Exception ignored){}}
             addon("onContacts",result);
         });
     }
@@ -343,6 +288,7 @@ public final class MainActivity extends Activity {
     }
     @Override protected void onResume() {
         super.onResume();
+        if(store!=null)themeMode=store.theme();
         applyNativeTheme();
         if (webView != null) webView.evaluateJavascript("window.AttendanceApp&&window.AttendanceApp.onResume()", null);
     }

@@ -114,6 +114,9 @@ public final class SmsOutbox {
     // 1=requested, 0=failed, -1=cancelled before handoff to the modem.
     private static int transmit(Context c,JSONObject job,StateReader reader) throws Exception {
         String error=null;SmsManager manager=null;ArrayList<String> parts=null;
+        ArrayList<PendingIntent> sent=new ArrayList<>();
+        // Preparation failures happen before any modem handoff.
+        try {
         if(!capable(c))error="이 기기는 SMS 발송을 지원하지 않아요.";
         else if(c.checkSelfPermission(Manifest.permission.SEND_SMS)!=PackageManager.PERMISSION_GRANTED)error="문자 권한이 없어요. 설정에서 권한을 허용해 주세요.";
         else if(!simReady())error="휴대폰 설정에서 기본 SMS용 SIM을 선택해 주세요.";
@@ -121,15 +124,19 @@ public final class SmsOutbox {
         else {
             manager=SmsManager.getSmsManagerForSubscriptionId(SubscriptionManager.getDefaultSmsSubscriptionId());
             parts=manager.divideMessage(job.getString("message"));
-            if(parts.size()>10)error="문구가 너무 길어요. 10개 이하의 SMS 분량으로 줄여 주세요.";
+            if(parts.isEmpty())error="문자를 전송 데이터로 만들지 못했어요.";
+            else if(parts.size()>10)error="문구가 너무 길어요. 10개 이하의 SMS 분량으로 줄여 주세요.";
         }
         if(error!=null){fail(c,job.getString("id"),error);return 0;}
         final int count=parts.size();
         synchronized(LOCK){JSONArray jobs=read(c);for(int i=0;i<jobs.length();i++)if(job.getString("id").equals(jobs.getJSONObject(i).getString("id")))jobs.getJSONObject(i).put("parts",count);write(c,jobs);}
-        ArrayList<PendingIntent> sent=new ArrayList<>();
         for(int i=0;i<count;i++){
             Intent intent=new Intent(c,SmsResultReceiver.class).setAction(c.getPackageName()+".SMS_SENT").setData(Uri.parse("oneul://sms/"+job.getString("id")+"/"+i)).putExtra("jobId",job.getString("id")).putExtra("part",i);
             sent.add(PendingIntent.getBroadcast(c,0,intent,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE));
+        }
+        }catch(Exception preparationError){
+            fail(c,job.getString("id"),"문자 발송을 준비하지 못했어요. SIM·권한·기기 상태를 확인해 주세요.");
+            return 0;
         }
         // Serialize only one modem handoff with settings saves, never the whole batch.
         synchronized(reader.lock()){
@@ -158,7 +165,7 @@ public final class SmsOutbox {
     // A multipart SMS has one result per part. Never label the whole request successful
     // until every part is confirmed; give outstanding callbacks time before offering retry.
     private static void summarize(JSONObject j,long now) throws Exception {
-        if("cancelled".equals(j.optString("state")))return;
+        if("cancelled".equals(j.optString("state"))){j.put("sentParts",0).put("failedParts",0).put("pendingParts",0);return;}
         JSONObject results=j.optJSONObject("results");int parts=j.optInt("parts");
         int received=0,sent=0,failed=0,legacy=0,failureCode=Activity.RESULT_OK;
         if(results!=null)for(int p=0;p<parts;p++){
@@ -189,11 +196,27 @@ public final class SmsOutbox {
         if(code==SmsManager.RESULT_ERROR_NULL_PDU)return "문자 내용을 전송 데이터로 만들지 못했어요.";
         return "통신사가 발송 실패를 반환했어요. 일부 분할 문자는 도착했을 수 있어요. (코드 "+code+")";
     }
+    private static boolean retryable(JSONObject job,long now){
+        String state=job.optString("state");
+        return "failed".equals(state)||"partial".equals(state)||"unknown".equals(state)||
+            "sending".equals(state)&&now-job.optLong("createdAt")>120000;
+    }
     public static JSONObject logs(Context c) throws Exception {
         synchronized(LOCK){
             JSONArray jobs=read(c),recent=new JSONArray();
+            Map<String,Integer> latest=new HashMap<>();Set<String> completed=new HashSet<>();
+            for(int i=0;i<jobs.length();i++){
+                JSONObject j=jobs.getJSONObject(i);String key=j.getString("key");
+                if(!"cancelled".equals(j.optString("state")))latest.put(key,i);
+                if("sent".equals(j.optString("state")))completed.add(key);
+            }
             for(int i=jobs.length()-1;i>=Math.max(0,jobs.length()-200);i--){
-                JSONObject j=new JSONObject(jobs.getJSONObject(i).toString());summarize(j,System.currentTimeMillis());recent.put(j);
+                JSONObject j=new JSONObject(jobs.getJSONObject(i).toString());summarize(j,System.currentTimeMillis());
+                String key=j.getString("key"),reason="";
+                if(completed.contains(key))reason="이미 발송 완료된 문자가 있어 재전송하지 않아요.";
+                else if(latest.containsKey(key)&&latest.get(key)>i)reason="새로운 재전송 기록에서 결과를 확인해 주세요.";
+                j.put("canRetry",retryable(j,System.currentTimeMillis())&&today().equals(j.optString("date"))&&reason.isEmpty());
+                j.put("retryUnavailableReason",reason);recent.put(j);
             }
             return new JSONObject().put("ok",true).put("jobs",recent);
         }
@@ -202,8 +225,8 @@ public final class SmsOutbox {
         JSONObject state=reader.read();
         if(state==null)throw new Exception("설정 변경으로 재전송 요청이 취소됐어요.");
         JSONObject retry=null;
-        synchronized(LOCK){JSONArray jobs=read(c);JSONObject old=null;for(int i=0;i<jobs.length();i++)if(oldId.equals(jobs.getJSONObject(i).getString("id")))old=jobs.getJSONObject(i);
-            if(old==null||!("failed".equals(old.optString("state"))||"partial".equals(old.optString("state"))||"unknown".equals(old.optString("state"))||("sending".equals(old.optString("state"))&&System.currentTimeMillis()-old.optLong("createdAt")>120000)))throw new Exception("다시 보낼 수 있는 기록이 아니에요.");
+        synchronized(LOCK){JSONArray jobs=read(c);JSONObject old=null;int oldIndex=-1;for(int i=0;i<jobs.length();i++)if(oldId.equals(jobs.getJSONObject(i).getString("id"))){old=jobs.getJSONObject(i);oldIndex=i;}
+            if(old==null||!retryable(old,System.currentTimeMillis()))throw new Exception("다시 보낼 수 있는 기록이 아니에요.");
             if(!today().equals(old.getString("date")))throw new Exception("지난 날짜의 문자는 다시 보내지 않아요.");
             JSONObject config=state.getJSONObject("settings").getJSONObject("sms");
             if(!config.optBoolean("enabled"))throw new Exception("문자 자동 발송을 먼저 켜 주세요.");
@@ -211,7 +234,11 @@ public final class SmsOutbox {
             JSONObject s=student(state,old.getString("studentId")),r=record(state,old.getString("studentId"),old.getString("date"));boolean allowed=false;
             if(s!=null&&s.optBoolean("active")&&r!=null&&old.getString("attendanceStatus").equals(r.getString("status"))){JSONArray gs=s.getJSONArray("guardians");for(int i=0;i<gs.length();i++)if(gs.getJSONObject(i).optBoolean("notify")&&old.getString("phone").equals(SmsRules.phone(gs.getJSONObject(i).optString("phone"))))allowed=true;}
             if(!allowed)throw new Exception("학생 상태나 수신 연락처가 바뀌었어요. 현재 등록 정보를 확인해 주세요.");
-            for(int i=0;i<jobs.length();i++){JSONObject j=jobs.getJSONObject(i);if(old.getString("key").equals(j.getString("key"))&&!oldId.equals(j.getString("id"))&&!"cancelled".equals(j.optString("state"))&&j.optLong("createdAt")>=old.optLong("createdAt"))throw new Exception("이미 재전송한 기록이에요. 최신 결과를 확인해 주세요.");}
+            for(int i=0;i<jobs.length();i++){
+                JSONObject j=jobs.getJSONObject(i);if(!old.getString("key").equals(j.getString("key")))continue;
+                if("sent".equals(j.optString("state")))throw new Exception("이미 발송 완료된 문자가 있어 재전송하지 않아요.");
+                if(i>oldIndex&&!"cancelled".equals(j.optString("state")))throw new Exception("이미 재전송한 기록이에요. 최신 결과를 확인해 주세요.");
+            }
             retry=new JSONObject(old.toString()).put("id",UUID.randomUUID().toString()).put("createdAt",System.currentTimeMillis()).put("state","sending").put("error","").put("resultVersion",2).put("parts",0).put("results",new JSONObject());jobs.put(retry);write(c,jobs);
         }
         int outcome=transmit(c,retry,reader);

@@ -38,6 +38,7 @@ jobs:
           node --check tests/settings-ui.cjs
           node --check tests/midnight-ui.cjs
           node --check tests/theme-autosave-ui.cjs
+          node --check tests/audit-ui.cjs
       - name: Node unit tests
         run: node --test tests/core.test.cjs tests/contacts-sms.test.cjs
       - name: SMS rules Java unit tests
@@ -45,7 +46,7 @@ jobs:
           mkdir -p out/sms-tests
           javac -encoding UTF-8 -d out/sms-tests app/src/main/java/kr/academy/attendance/SmsRules.java tests/SmsRulesTest.java
           java -cp out/sms-tests SmsRulesTest
-      - name: Native SMS callback and cancellation regressions
+      - name: Native SMS and persistence regressions
         run: |
           curl --fail --location --retry 3 https://repo.maven.apache.org/maven2/org/json/json/20240303/json-20240303.jar -o /tmp/attendance-json.jar
           python tests/native_sms.py --json-jar /tmp/attendance-json.jar
@@ -60,6 +61,7 @@ jobs:
           node tests/settings-ui.cjs
           node tests/midnight-ui.cjs
           node tests/theme-autosave-ui.cjs
+          node tests/audit-ui.cjs
       - name: Configure Android SDK
         uses: android-actions/setup-android@v4
       - name: Install Android SDK 35
@@ -68,10 +70,10 @@ jobs:
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platforms;android-35" "build-tools;35.0.0"
       - name: Build and verify test APK
-        run: python scripts/build_apk.py --output out/AcademyAttendance-1.3.0.apk
+        run: python scripts/build_apk.py --output out/AcademyAttendance-1.3.1.apk
       - name: Publish test build
         uses: actions/upload-artifact@v4
         with:
-          name: academy-attendance-1.3.0-ci-test-install-only
-          path: out/AcademyAttendance-1.3.0.apk
+          name: academy-attendance-1.3.1-ci-test-install-only
+          path: out/AcademyAttendance-1.3.1.apk
           retention-days: 7
