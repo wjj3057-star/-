@@ -51,10 +51,13 @@ public final class MainActivity extends Activity {
     private String pendingExportToken;
     private boolean pickerOpen;
     private String pendingContactRequest="";
-    private final UiEvents uiEvents=new UiEvents(script->{if(webView!=null)webView.evaluateJavascript(script,null);});
+    private UiEvents uiEvents;
 
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        Object retained=getLastNonConfigurationInstance();
+        uiEvents=retained instanceof UiEvents?(UiEvents)retained:new UiEvents(null);
+        uiEvents.attach(script->{if(webView!=null)webView.evaluateJavascript(script,null);});
         store = AttendanceStore.get(getApplicationContext());
         exports = new PendingExport(getCacheDir());
         if(savedInstanceState!=null){pendingExportToken=savedInstanceState.getString("exportToken");pickerOpen=savedInstanceState.getBoolean("pickerOpen",false);}
@@ -158,7 +161,7 @@ public final class MainActivity extends Activity {
         }
     }
     public final class Bridge {
-        @JavascriptInterface public void ready(){runOnUiThread(()->uiEvents.ready());}
+        @JavascriptInterface public void ready(){runOnUiThread(()->{if(!isDestroyed()&&webView!=null)uiEvents.ready();});}
         @JavascriptInterface public String readState() { return store.readState(); }
         @JavascriptInterface public String saveState(String json) {
             String result=store.saveState(json);
@@ -271,6 +274,7 @@ public final class MainActivity extends Activity {
     @Override protected void onSaveInstanceState(Bundle out){
         super.onSaveInstanceState(out);out.putString("exportToken",pendingExportToken);out.putBoolean("pickerOpen",pickerOpen);
     }
+    @Override public Object onRetainNonConfigurationInstance(){return uiEvents;}
     @Override protected void onActivityResult(int request, int result, Intent intent) {
         super.onActivityResult(request, result, intent);
         if (request != EXPORT && request != IMPORT) return;
@@ -310,7 +314,7 @@ public final class MainActivity extends Activity {
         if (webView != null) webView.evaluateJavascript("window.AttendanceApp&&window.AttendanceApp.onResume()", null);
     }
     @Override protected void onDestroy() {
-        uiEvents.close();
+        if(uiEvents!=null){if(isChangingConfigurations())uiEvents.detach();else uiEvents.close();}
         if(isFinishing()&&exports!=null)exports.discard(pendingExportToken);
         if (webView != null) { webView.removeJavascriptInterface("NativeAttendance"); webView.destroy(); webView = null; }
         io.shutdown(); super.onDestroy();

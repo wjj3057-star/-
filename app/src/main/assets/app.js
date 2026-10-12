@@ -19,7 +19,17 @@
   const native = window.NativeAttendance || null;
   let state, loadError = '', lastFocus = null, undoState = null, toastTimer, importData = null;
   let today = C.localDate();
-  const ui = {tab:'attendance',date:today,query:'',studentQuery:'',showArchived:false,month:today.slice(0,7)};
+  const PAGE_SIZE=50;
+  const ui = {tab:'attendance',date:today,query:'',studentQuery:'',showArchived:false,month:today.slice(0,7),attendancePage:0,studentPage:0,reportPage:0};
+  function pageRows(rows,key){
+    ui[key]=Math.min(Math.max(0,ui[key]),Math.max(0,Math.ceil(rows.length/PAGE_SIZE)-1));
+    return rows.slice(ui[key]*PAGE_SIZE,(ui[key]+1)*PAGE_SIZE);
+  }
+  function listPager(total,key,label){
+    if(total<=PAGE_SIZE)return '';
+    const page=ui[key],pages=Math.ceil(total/PAGE_SIZE);
+    return `<div class="list-pagination" role="group" aria-label="${label} 페이지"><button class="secondary small-button" data-action="list-page" data-page-kind="${key}" data-amount="-1" ${page===0?'disabled':''}>이전</button><span class="hint" role="status">${page+1} / ${pages}페이지<br>전체 ${total}명 중 ${page*PAGE_SIZE+1}–${Math.min(total,(page+1)*PAGE_SIZE)}명</span><button class="secondary small-button" data-action="list-page" data-page-kind="${key}" data-amount="1" ${page+1>=pages?'disabled':''}>다음</button></div>`;
+  }
   function readState() {
     const raw = native ? JSON.parse(native.readState()) : {ok:true,data:localStorage.getItem('oneul-attendance-v1')};
     if (!raw.ok) throw new Error('저장된 데이터를 읽지 못했습니다. 앱을 다시 열거나 백업 파일을 복원해 주세요.');
@@ -83,10 +93,10 @@
     if (!state.students.length) return empty('첫 학생을 등록해 주세요','학생을 한 번 등록하면\n매일 간편하게 출석을 체크할 수 있어요.',`<button class="primary" data-action="student-add">${icon('plus')} 학생 등록하기</button>`,'users');
     const rows = C.roster(state,ui.date,'all',false,ui.query);
     if (!rows.length) return empty(ui.query?'검색 결과가 없어요':'이 날짜의 학생이 없어요',ui.query?'학생 이름을 다시 확인해 주세요.':'학생의 등록일과 보관 상태를 확인해 주세요.');
-    return `<div class="student-list">${rows.map(row=>{
+    return `<div class="student-list">${pageRows(rows,'attendancePage').map(row=>{
       const {student:s,record:r}=row, st=r?r.status:'unmarked';
       return `<article class="student-card" data-student="${e(s.id)}"><div class="student-top"><div class="student-avatar" >${e(row.name.slice(0,1))}</div><button class="student-info" data-action="student-detail" data-id="${e(s.id)}" aria-label="${e(row.name)} 기록 보기"><h3>${e(row.name)}</h3><p>${r&&r.time?'등원 시각 '+e(r.time):r?C.LABELS[r.status]+'으로 기록됨':'미출석 상태 확인'}</p></button>${r&&r.time?`<span class="student-meta">${icon('clock')}${e(r.time)}</span>`:''}<button class="note-button ${r&&r.note?'has-note':''}" data-action="record-note" data-id="${e(s.id)}" aria-label="${e(row.name)} 출석 메모">${icon('note')}</button></div><div class="status-row" role="group" aria-label="${e(row.name)} 출석 상태">${C.STATUSES.map(status=>`<button class="status-button ${status} ${st===status?'selected':''}" data-action="mark" data-id="${e(s.id)}" data-status="${status}" aria-pressed="${st===status}" ${ui.date>today?'disabled':''}>${icon('check')}${C.LABELS[status]}</button>`).join('')}</div>${r&&r.note?`<p class="record-note">${e(r.note)}</p>`:''}</article>`;
-    }).join('')}</div>`;
+    }).join('')}</div>`+listPager(rows.length,'attendancePage','출석부');
   }
   function students() {
     const active = state.students.filter(s=>s.active).length;
@@ -96,7 +106,7 @@
     const query=ui.studentQuery.trim().toLowerCase();
     const list=state.students.filter(s=>(s.active||ui.showArchived)&&(!query||s.name.toLowerCase().includes(query))).sort((a,b)=>Number(b.active)-Number(a.active)||a.name.localeCompare(b.name,'ko'));
     if (!list.length) return empty('등록된 학생이 없어요','학생을 등록하거나 검색 조건을 바꿔 주세요.',`<button class="primary" data-action="student-add">${icon('plus')} 학생 등록</button>`,'users');
-    return `<div class="student-list students-grid">${list.map(s=>`<button class="student-card row ${s.active?'':'archived'}" data-action="student-detail" data-id="${e(s.id)}" style="text-align:left;min-height:88px"><span class="student-avatar">${e(s.name.slice(0,1))}</span><span class="student-info"><h3>${e(s.name)} ${s.active?'':'<span class="label-pill">보관</span>'}</h3><p>${e(s.joinedDate)} 등록</p></span>${icon('right')}</button>`).join('')}</div>`;
+    return `<div class="student-list students-grid">${pageRows(list,'studentPage').map(s=>`<button class="student-card row ${s.active?'':'archived'}" data-action="student-detail" data-id="${e(s.id)}" style="text-align:left;min-height:88px"><span class="student-avatar">${e(s.name.slice(0,1))}</span><span class="student-info"><h3>${e(s.name)} ${s.active?'':'<span class="label-pill">보관</span>'}</h3><p>${e(s.joinedDate)} 등록</p></span>${icon('right')}</button>`).join('')}</div>`+listPager(list.length,'studentPage','학생 목록');
   }
   function monthControls() { return `<div class="date-nav"><button class="icon-button" data-action="month-shift" data-amount="-1" aria-label="이전 달">${icon('left')}</button><label class="date-field">${icon('calendar')}<input type="month" id="report-month" aria-label="기록 조회 월" value="${ui.month}" min="2000-01" max="2100-12"></label><button class="icon-button" data-action="month-shift" data-amount="1" aria-label="다음 달">${icon('right')}</button><button class="date-today" data-action="this-month">이번 달</button></div>`; }
   function reports() {
@@ -104,12 +114,13 @@
     const [year,month]=ui.month.split('-').map(Number), start=new Date(year,month-1,1).getDay(),num=new Date(year,month,0).getDate();
     const calendar=`<div class="calendar"><div class="calendar-head">${days.map(d=>`<div>${d}</div>`).join('')}</div><div class="calendar-grid">${'<span></span>'.repeat(start)}${Array.from({length:num},(_,i)=>{const d=`${ui.month}-${String(i+1).padStart(2,'0')}`,rec=rep.records.filter(r=>r.date===d),sts=new Set(rec.map(r=>r.status));return `<button class="calendar-day ${rec.length?'has-record':''} ${d===today?'is-today':''} ${d>today?'future':''}" data-action="calendar-date" data-date="${d}" aria-label="${e(dateLong(d))}, ${rec.length}건"><span>${i+1}</span><span class="day-dots">${C.STATUSES.filter(s=>sts.has(s)).map(s=>`<i class="${s}"></i>`).join('')}</span></button>`;}).join('')}</div><div class="calendar-legend">${[['present','#34a280'],['late','#d6a245'],['absent','#d77585'],['excused','#9f80cf']].map(([s,color])=>`<span><i style="background:${color}"></i>${C.LABELS[s]}</span>`).join('')}</div></div>`;
     const byStudent=new Map();rep.records.forEach(r=>{if(!byStudent.has(r.studentId))byStudent.set(r.studentId,{id:r.studentId,name:r.studentName,counts:{present:0,late:0,absent:0,excused:0}});byStudent.get(r.studentId).counts[r.status]++;});
-    const studentsHTML=byStudent.size?`<div class="white-card">${[...byStudent.values()].sort((a,b)=>a.name.localeCompare(b.name,'ko')).map(s=>`<button class="history-row" data-action="student-detail" data-id="${e(s.id)}"><div><strong>${e(s.name)}</strong></div><div class="history-counts">${C.STATUSES.map(st=>`<span class="${st}" aria-label="${C.LABELS[st]} ${s.counts[st]}회">${s.counts[st]}</span>`).join('')}${icon('right')}</div></button>`).join('')}</div>`:empty('아직 출석 기록이 없어요','선택한 달에 출석을 체크하면\n여기에서 학생별 기록을 볼 수 있어요.','', 'chart');
-    return head('출석 기록','하루하루 쌓이는 출석 기록',`<button class="icon-button" data-action="export-month" aria-label="월간 CSV 내보내기">${icon('download')}</button>`)+monthControls()+''+`<div class="report-layout section-gap"><div><section class="report-hero"><p class="eyebrow">${month}월 출석률</p><div class="report-big">${rep.rate===null?'—':rep.rate}<span>${rep.rate===null?'':'%'}</span></div><p class="report-copy">(출석 + 지각) ÷ (출석 + 지각 + 결석)<br>공결과 미출석은 제외해요. 횟수는 학생별 체크 건수예요.</p><div class="report-counts">${C.STATUSES.map(s=>`<div><b>${t[s]}<small>회</small></b>${C.LABELS[s]}</div>`).join('')}</div></section>${calendar}<p class="hint">날짜를 누르면 그날의 출석부로 이동해요.</p></div><div><div class="section-title"><h2>학생별 기록</h2><span class="muted"><small>출석 · 지각 · 결석 · 공결</small></span></div>${studentsHTML}<button class="secondary full" data-action="export-month">${icon('download')} 이 달 기록 CSV 저장</button></div></div>`;
+    const reportStudents=[...byStudent.values()].sort((a,b)=>a.name.localeCompare(b.name,'ko'));
+    const studentsHTML=byStudent.size?`<div class="white-card">${pageRows(reportStudents,'reportPage').map(s=>`<button class="history-row" data-action="student-detail" data-id="${e(s.id)}"><div><strong>${e(s.name)}</strong></div><div class="history-counts">${C.STATUSES.map(st=>`<span class="${st}" aria-label="${C.LABELS[st]} ${s.counts[st]}회">${s.counts[st]}</span>`).join('')}${icon('right')}</div></button>`).join('')}</div>`+listPager(reportStudents.length,'reportPage','학생별 기록'):empty('아직 출석 기록이 없어요','선택한 달에 출석을 체크하면\n여기에서 학생별 기록을 볼 수 있어요.','', 'chart');
+    return head('출석 기록','하루하루 쌓이는 출석 기록',`<button class="icon-button" data-action="export-month" aria-label="월간 CSV 내보내기">${icon('download')}</button>`)+monthControls()+''+`<div class="report-layout section-gap"><div><section class="report-hero"><p class="eyebrow">${month}월 출석률</p><div class="report-big">${rep.rate===null?'—':rep.rate}<span>${rep.rate===null?'':'%'}</span></div><p class="report-copy">(출석 + 지각) ÷ (출석 + 지각 + 결석)<br>공결과 미출석은 제외해요. 횟수는 학생별 체크 건수예요.</p><div class="report-counts">${C.STATUSES.map(s=>`<div><b>${t[s]}<small>회</small></b>${C.LABELS[s]}</div>`).join('')}</div></section>${calendar}<p class="hint">날짜를 누르면 그날의 출석부로 이동해요.</p></div><div><div class="section-title"><h2>학생별 기록</h2><span class="muted"><small>출석 · 지각 · 결석 · 공결</small></span></div><div id="report-student-list">${studentsHTML}</div><button class="secondary full" data-action="export-month">${icon('download')} 이 달 기록 CSV 저장</button></div></div>`;
   }
   function settings() {
     const settingsRow=(action,im,label,sub)=>`<button class="settings-row" data-action="${action}"><span class="settings-icon">${icon(im)}</span><span class="settings-label"><b>${e(label)}</b><small>${e(sub)}</small></span>${icon('right')}</button>`;
-    return head('설정','우리 학원에 맞게 관리해 보세요')+`<div class="settings-layout"><section><div class="settings-title">학원 정보</div><div class="settings-card">${settingsRow('academy-edit','home',state.settings.academy,state.settings.teacher?state.settings.teacher+' 선생님':'학원 이름과 선생님 이름 설정')}</div><div class="settings-title">화면 설정</div><div class="settings-card">${settingsRow('theme-edit','settings','화면 테마',themeLabels[state.settings.theme])}</div><div class="settings-title">출석 관리</div><div class="white-card"><div class="row" style="color:var(--accent);margin-bottom:11px">${icon('calendar')}<h3>매일 자정 자동 초기화</h3></div><p class="modal-copy">매일 오전 0시에 새로운 출석부로 전환되어 모든 학생이 미출석으로 표시돼요. 어제까지의 출결 기록은 삭제되지 않고 출석 기록에서 조회할 수 있어요.</p></div></section><section>${window.ContactSms?window.ContactSms.settingsHTML():''}<div class="settings-title">데이터 관리</div><div class="settings-card">${settingsRow('backup','download','전체 데이터 백업','학생·출석 기록을 JSON 파일로 저장')}${settingsRow('import','upload','백업 파일 복원','저장해 둔 백업으로 현재 데이터를 교체')}${settingsRow('export-all','chart','전체 출석 기록 내보내기','엑셀에서 열 수 있는 CSV 파일로 저장')}</div><div class="white-card"><div class="row" style="color:var(--accent);margin-bottom:11px">${icon('shield')}<h3>이 기기에 안전하게 보관</h3></div><p class="modal-copy">학생 정보와 출석 기록은 이 기기에 저장돼요. 연락처 연동은 읽기 권한을, 학부모 문자는 SMS 권한과 문자 발송이 가능한 SIM을 사용해요. 다른 기기와 자동 동기화되지 않아요.</p><p class="hint">기기를 바꾸거나 앱을 삭제하기 전에 전체 데이터를 백업해 주세요.</p></div><p class="hint" style="text-align:center">오늘출석 1.3.2</p></section></div>`;
+    return head('설정','우리 학원에 맞게 관리해 보세요')+`<div class="settings-layout"><section><div class="settings-title">학원 정보</div><div class="settings-card">${settingsRow('academy-edit','home',state.settings.academy,state.settings.teacher?state.settings.teacher+' 선생님':'학원 이름과 선생님 이름 설정')}</div><div class="settings-title">화면 설정</div><div class="settings-card">${settingsRow('theme-edit','settings','화면 테마',themeLabels[state.settings.theme])}</div><div class="settings-title">출석 관리</div><div class="white-card"><div class="row" style="color:var(--accent);margin-bottom:11px">${icon('calendar')}<h3>매일 자정 자동 초기화</h3></div><p class="modal-copy">매일 오전 0시에 새로운 출석부로 전환되어 모든 학생이 미출석으로 표시돼요. 어제까지의 출결 기록은 삭제되지 않고 출석 기록에서 조회할 수 있어요.</p></div></section><section>${window.ContactSms?window.ContactSms.settingsHTML():''}<div class="settings-title">데이터 관리</div><div class="settings-card">${settingsRow('backup','download','전체 데이터 백업','학생·출석 기록을 JSON 파일로 저장')}${settingsRow('import','upload','백업 파일 복원','저장해 둔 백업으로 현재 데이터를 교체')}${settingsRow('export-all','chart','전체 출석 기록 내보내기','엑셀에서 열 수 있는 CSV 파일로 저장')}</div><div class="white-card"><div class="row" style="color:var(--accent);margin-bottom:11px">${icon('shield')}<h3>이 기기에 안전하게 보관</h3></div><p class="modal-copy">학생 정보와 출석 기록은 이 기기에 저장돼요. 연락처 연동은 읽기 권한을, 학부모 문자는 SMS 권한과 문자 발송이 가능한 SIM을 사용해요. 다른 기기와 자동 동기화되지 않아요.</p><p class="hint">기기를 바꾸거나 앱을 삭제하기 전에 전체 데이터를 백업해 주세요.</p></div><p class="hint" style="text-align:center">오늘출석 1.3.3</p></section></div>`;
   }
   function modal(title, body, onSubmit) {
     if(window.ContactSms&&window.ContactSms.onModalReplace)window.ContactSms.onModalReplace();
@@ -143,7 +154,7 @@
     const s=state.students.find(x=>x.id===id);if(!s)return;
     const month=ui.tab==='reports'?ui.month:ui.date.slice(0,7);
     const records=state.records.filter(r=>r.studentId===id&&r.date.startsWith(month+'-')).sort((a,b)=>b.date.localeCompare(a.date)),t=C.count(records.map(r=>({record:r})));
-    modal(s.name,`<p class="modal-subtitle">${e(s.joinedDate)} 등록${s.active?'':' · 보관 중'}</p>${s.memo?`<div class="notice">${e(s.memo)}</div>`:''}${window.ContactSms?window.ContactSms.details(s):''}<div class="detail-stats">${C.STATUSES.map(st=>`<div><b>${t[st]}</b>${C.LABELS[st]}</div>`).join('')}</div><p class="record-summary">${e(month.replace('-','년 '))}월 기록 ${records.length}건</p>${records.length?records.map(r=>`<div class="log-row"><div class="row between"><span class="log-date">${e(dateLong(r.date))}${r.time?`<br><small>${e(r.time)}</small>`:''}</span><button class="status-label ${r.status}" data-action="detail-date" data-date="${r.date}">${C.LABELS[r.status]} ${icon('right')}</button></div>${r.note?`<p class="log-note">${e(r.note)}</p>`:''}</div>`).join(''):'<p class="hint">이 달에는 저장된 출석 기록이 없어요.</p>'}<div class="modal-actions"><button class="secondary" data-action="student-edit" data-id="${e(id)}">${icon('edit')} 정보 수정</button><button class="${s.active?'danger-button':'primary'}" data-action="student-archive" data-id="${e(id)}">${s.active?'학생 보관':'보관 해제'}</button></div>`);
+    modal(s.name,`<p class="modal-subtitle">${e(s.joinedDate)} 등록${s.active?'':' · 보관 중'}</p>${s.memo?`<div class="notice">${e(s.memo)}</div>`:''}${window.ContactSms?window.ContactSms.details(s):''}<div class="detail-stats">${C.STATUSES.map(st=>`<div><b>${t[st]}</b>${C.LABELS[st]}</div>`).join('')}</div><p class="record-summary">${e(month.replace('-','년 '))}월 기록 ${records.length}건</p>${records.length?records.map(r=>`<div class="log-row"><div class="row between"><span class="log-date">${e(dateLong(r.date))}${r.time?`<br><small>${e(r.time)}</small>`:''}</span><button class="status-label ${r.status}" data-action="detail-date" data-date="${r.date}" data-id="${e(id)}">${C.LABELS[r.status]} ${icon('right')}</button></div>${r.note?`<p class="log-note">${e(r.note)}</p>`:''}</div>`).join(''):'<p class="hint">이 달에는 저장된 출석 기록이 없어요.</p>'}<div class="modal-actions"><button class="secondary" data-action="student-edit" data-id="${e(id)}">${icon('edit')} 정보 수정</button><button class="${s.active?'danger-button':'primary'}" data-action="student-archive" data-id="${e(id)}">${s.active?'학생 보관':'보관 해제'}</button></div>`);
   }
   function recordNote(id) {
     if(ui.date>today)return toast('미래 날짜에는 기록할 수 없어요.');
@@ -184,12 +195,24 @@
     }catch(error){toast(error.message);}
   }
   function markStudent(id,status){try {const old=C.recordOf(state,id,ui.date);if(saveAttendance(C.mark(state,id,ui.date,status=== (old&&old.status)?'unmarked':status),status===(old&&old.status)?'미출석으로 되돌렸어요.':`${C.LABELS[status]}으로 저장했어요.`)){} }catch(error){toast(error.message);}}
-  function setDate(date){if(!C.validDate(date))return;ui.date=date;ui.query='';render();}
+  function setDate(date,studentId=''){
+    if(!C.validDate(date))return;
+    ui.date=date;ui.query='';ui.attendancePage=0;
+    if(studentId){const index=C.roster(state,date).findIndex(row=>row.student.id===studentId);if(index>=0)ui.attendancePage=Math.floor(index/PAGE_SIZE);}
+    render();
+    if(studentId){const card=[...document.querySelectorAll('#attendance-list [data-student]')].find(row=>row.dataset.student===studentId);if(card){card.scrollIntoView({block:'center'});card.querySelector('[data-action=student-detail]').focus({preventScroll:true});}}
+  }
   document.addEventListener('click',ev=>{
     const b=ev.target.closest('[data-action]');if(!b||b.disabled)return;
     if(C.localDate()!==today){onResume();return;}
     const a=b.dataset.action,id=b.dataset.id;
     if(a==='tab'){ui.tab=b.dataset.tab;render();window.scrollTo(0,0);}
+    else if(a==='list-page'){
+      const key=b.dataset.pageKind;if(!['attendancePage','studentPage','reportPage'].includes(key))return;
+      ui[key]+=Number(b.dataset.amount);render();
+      const list=$(key==='attendancePage'?'#attendance-list':key==='studentPage'?'#student-list':'#report-student-list');
+      if(list){list.scrollIntoView({block:'start'});list.setAttribute('tabindex','-1');list.focus({preventScroll:true});}
+    }
     else if(a==='close')closeModal();
     else if(a==='student-add')studentForm();
     else if(a==='student-edit')studentForm(id);
@@ -210,7 +233,7 @@
     else if(a==='bulk-present'){
       const rows=C.roster(state,ui.date,'all',false,ui.query).filter(row=>!row.record);if(!rows.length)return toast('현재 목록의 출석을 모두 확인했어요.');
       const date=ui.date;
-      confirmDialog('한 번에 출석 처리할까요?',`${dateLong(date)}\n현재 검색 조건에 해당하는 미출석 학생 ${rows.length}명만 출석 처리해요.\n이미 체크한 학생의 상태는 유지돼요.${state.settings.sms.enabled?'\n문자 수신을 켠 학부모에게 출석 문자도 발송됩니다.':''}`,'출석 처리',()=>{try{const next=C.markUnmarkedPresent(state,rows.map(row=>row.student.id),date);saveAttendance(next,`${rows.length}명을 출석 처리했어요.`);}catch(error){toast(error.message);}});
+      confirmDialog('한 번에 출석 처리할까요?',`${dateLong(date)}\n현재 검색 조건에 해당하는 미출석 학생 ${rows.length}명만 출석 처리해요. 다른 페이지의 검색 결과도 포함돼요.\n이미 체크한 학생의 상태는 유지돼요.${state.settings.sms.enabled?'\n문자 수신을 켠 학부모에게 출석 문자도 발송됩니다.':''}`,'출석 처리',()=>{try{const next=C.markUnmarkedPresent(state,rows.map(row=>row.student.id),date);saveAttendance(next,`${rows.length}명을 출석 처리했어요.`);}catch(error){toast(error.message);}});
       $('.modal').dataset.attendanceDate=date;
     }
     else if(a==='student-archive'){
@@ -221,9 +244,9 @@
         save(next,target.active?'학생 보관을 해제했어요.':'학생을 보관했어요.',true);
       },s.active);
     }
-    else if(a==='calendar-date'||a==='detail-date'){closeModal();ui.tab='attendance';setDate(b.dataset.date);window.scrollTo(0,0);}
-    else if(a==='month-shift'){const d=new Date(ui.month+'-01T12:00:00');d.setMonth(d.getMonth()+Number(b.dataset.amount));const date=C.localDate(d);if(C.validDate(date)){ui.month=date.slice(0,7);render();}}
-    else if(a==='this-month'){ui.month=today.slice(0,7);render();}
+    else if(a==='calendar-date'||a==='detail-date'){closeModal();ui.tab='attendance';setDate(b.dataset.date,a==='detail-date'?id:'');if(a==='calendar-date')window.scrollTo(0,0);}
+    else if(a==='month-shift'){const d=new Date(ui.month+'-01T12:00:00');d.setMonth(d.getMonth()+Number(b.dataset.amount));const date=C.localDate(d);if(C.validDate(date)){ui.month=date.slice(0,7);ui.reportPage=0;render();}}
+    else if(a==='this-month'){ui.month=today.slice(0,7);ui.reportPage=0;render();}
     else if(a==='backup')exportFile(`오늘출석_백업_${today}.json`,'application/json',C.backup(state));
     else if(a==='export-all')exportFile(`오늘출석_전체기록_${today}.csv`,'text/csv',C.csv(state.records));
     else if(a==='export-month')exportFile(`오늘출석_${ui.month}_전체.csv`,'text/csv',C.csv(C.report(state,ui.month).records));
@@ -231,13 +254,13 @@
     else if(a==='reload'){try{state=readState();ui.showArchived=state.settings.showArchived;loadError='';}catch(error){loadError=error.message;}applyTheme();render();}
   });
   document.addEventListener('input',ev=>{
-    if(ev.target.id==='attendance-search'){ui.query=ev.target.value;$('#attendance-list').innerHTML=attendanceList();}
-    if(ev.target.id==='student-search'){ui.studentQuery=ev.target.value;$('#student-list').innerHTML=studentList();}
+    if(ev.target.id==='attendance-search'){ui.query=ev.target.value;ui.attendancePage=0;$('#attendance-list').innerHTML=attendanceList();}
+    if(ev.target.id==='student-search'){ui.studentQuery=ev.target.value;ui.studentPage=0;$('#student-list').innerHTML=studentList();}
   });
   document.addEventListener('change',ev=>{
     if(ev.target.id==='attendance-date'){if(C.validDate(ev.target.value))setDate(ev.target.value);else{ev.target.value=ui.date;toast('올바른 날짜를 선택해 주세요. 기존 날짜를 유지합니다.');}}
     else if(ev.target.id==='archived-toggle'){const next=C.clone(state);next.settings.showArchived=ev.target.checked;if(!save(next,''))ev.target.checked=state.settings.showArchived;}
-    else if(ev.target.id==='report-month'){if(C.validDate(ev.target.value+'-01')){ui.month=ev.target.value;render();}else{ev.target.value=ui.month;toast('조회할 월을 선택해 주세요. 기존 월을 유지합니다.');}}
+    else if(ev.target.id==='report-month'){if(C.validDate(ev.target.value+'-01')){ui.month=ev.target.value;ui.reportPage=0;render();}else{ev.target.value=ui.month;toast('조회할 월을 선택해 주세요. 기존 월을 유지합니다.');}}
     else if(ev.target.id==='import-file'&&ev.target.files[0]){const file=ev.target.files[0];if(file.size>C.MAX_BACKUP_BYTES)return toast('백업 파일은 25MB 이하만 복원할 수 있어요.');file.text().then(handleImport).catch(()=>toast('파일을 읽지 못했어요.'));}
   });
   document.addEventListener('keydown',ev=>{
@@ -261,7 +284,7 @@
     applyTheme();
     const now=C.localDate();
     if(now!==today){
-      today=now;ui.date=now;ui.month=now.slice(0,7);ui.query='';undoState=null;
+      today=now;ui.date=now;ui.month=now.slice(0,7);ui.query='';ui.attendancePage=0;ui.reportPage=0;undoState=null;
       clearTimeout(toastTimer);$('#toast').innerHTML='';$('#toast').classList.remove('show');
       if($('.modal[data-attendance-date]'))closeModal();
       const joinedDate=$('#modal-root [name=joinedDate]');if(joinedDate)joinedDate.max=today;

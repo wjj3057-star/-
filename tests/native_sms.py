@@ -7,6 +7,7 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 SOURCES = {
 "android/Manifest.java": """package android; public class Manifest { public static class permission { public static final String SEND_SMS="sms"; } }""",
+"android/os/SystemClock.java": """package android.os; public class SystemClock { public static long offset; public static long elapsedRealtime(){return System.nanoTime()/1000000+offset;} }""",
 "android/app/Activity.java": """package android.app; public class Activity { public static final int RESULT_OK=-1; }""",
 "android/content/pm/PackageManager.java": """package android.content.pm; public class PackageManager { public static final String FEATURE_TELEPHONY="phone",FEATURE_TELEPHONY_MESSAGING="sms"; public static final int PERMISSION_GRANTED=0; public boolean hasSystemFeature(String s){return true;} }""",
 "android/content/Context.java": """package android.content;
@@ -94,7 +95,7 @@ public class NativeSmsTest {
   SmsOutbox.retry(c,reader,latest(c).getString("id"));check(SmsManager.sent.size()==2,"explicit retry accepted after all callbacks");
   c=context(root,"late");reader=new Reader(fixture(1));SmsManager.partCount=2;SmsOutbox.send(c,reader,changes());callback(c,0,1,-1);
   Path lateFile=c.getFilesDir().toPath().resolve("sms-outbox-v1.json");JSONArray lateJobs=new JSONArray(Files.readString(lateFile));
-  lateJobs.getJSONObject(0).put("createdAt",System.currentTimeMillis()-180000);Files.writeString(lateFile,lateJobs.toString());
+  lateJobs.getJSONObject(0).put("createdAt",System.currentTimeMillis()-180000);lateJobs.getJSONObject(0).remove("requestSession");lateJobs.getJSONObject(0).remove("requestedAt");Files.writeString(lateFile,lateJobs.toString());
   check(latest(c).getString("state").equals("unknown"),"timeout is uncertain, not a known failure");
   callback(c,0,0,-1);check(latest(c).getString("state").equals("sent"),"late success resolves uncertainty");
   check(SmsManager.sent.size()==1,"no automatic resend");
@@ -140,7 +141,7 @@ public class NativeSmsTest {
 
   c=context(root,"late-original-success");reader=new Reader(fixture(1));SmsOutbox.send(c,reader,changes());
   Path successFile=c.getFilesDir().toPath().resolve("sms-outbox-v1.json");JSONArray successJobs=new JSONArray(Files.readString(successFile));
-  successJobs.getJSONObject(0).put("createdAt",System.currentTimeMillis()-180000);Files.writeString(successFile,successJobs.toString());
+  successJobs.getJSONObject(0).put("createdAt",System.currentTimeMillis()-180000);successJobs.getJSONObject(0).remove("requestSession");successJobs.getJSONObject(0).remove("requestedAt");Files.writeString(successFile,successJobs.toString());
   SmsOutbox.retry(c,reader,latest(c).getString("id"));callback(c,1,0,4);callback(c,0,0,-1);
   check(!latest(c).optBoolean("canRetry",true),"a confirmed earlier success blocks a duplicate retry");
   try{SmsOutbox.retry(c,reader,latest(c).getString("id"));throw new AssertionError("confirmed SMS retransmitted");}catch(Exception expected){}
@@ -213,6 +214,38 @@ public class DeepSmsTest extends NativeSmsTest {
    try{SmsOutbox.send(c,r,changes());}catch(Exception expected){}
    AtomicFile.failCommit=false;check(SmsManager.sent.isEmpty(),"SMS was transmitted without a committed journal");
   });
+  scenario("result timeout starts at modem handoff, not preparation",()->{
+   final Context c=context(root,"slow-preparation");
+   Reader slow=new Reader(fixture(1)){int reads;public org.json.JSONObject read(){if(++reads==2)try{
+    Path file=c.getFilesDir().toPath().resolve("sms-outbox-v1.json");org.json.JSONArray jobs=new org.json.JSONArray(Files.readString(file));
+    jobs.getJSONObject(0).put("createdAt",System.currentTimeMillis()-180000);Files.writeString(file,jobs.toString());
+   }catch(Exception e){throw new RuntimeException(e);}return super.read();}};
+   SmsOutbox.send(c,slow,changes());
+   check(latest(c).getString("state").equals("sending"),"a just-requested SMS was already reported uncertain");
+   check(!latest(c).getBoolean("canRetry"),"a just-requested SMS offered immediate duplicate retry");
+  });
+  scenario("wall-clock changes cannot shorten or extend the live result timeout",()->{
+   Context c=context(root,"clock-timeout");Reader r=new Reader(fixture(1));SmsOutbox.send(c,r,changes());
+   Path file=c.getFilesDir().toPath().resolve("sms-outbox-v1.json");org.json.JSONArray jobs=new org.json.JSONArray(Files.readString(file));
+   jobs.getJSONObject(0).put("requestedAt",System.currentTimeMillis()-3600000);Files.writeString(file,jobs.toString());
+   check(latest(c).getString("state").equals("sending")&&!latest(c).getBoolean("canRetry"),"clock forward enabled premature retry");
+   jobs.getJSONObject(0).put("requestedAt",System.currentTimeMillis()+3600000);Files.writeString(file,jobs.toString());
+   android.os.SystemClock.offset+=180000;
+   check(latest(c).getString("state").equals("unknown")&&latest(c).getBoolean("canRetry"),"clock backward hid a real timeout");
+   callback(c,0,0,-1);check(latest(c).getString("state").equals("sent"),"late success survives clock changes");
+   android.os.SystemClock.offset=0;
+  });
+  scenario("disabling SMS during journal preparation remains effective before handoff",()->{
+   Context c=context(root,"disable-during-prepare");final Reader r=new Reader(fixture(1));final int[] writes={0};
+   AtomicFile.afterWrite=()->{if(++writes[0]==2){
+    Thread disable=new Thread(()->{synchronized(r.lock()){r.valid=false;}});disable.start();
+    try{disable.join(2000);}catch(InterruptedException e){throw new RuntimeException(e);}
+    check(!disable.isAlive(),"saving opt-out was blocked behind journal I/O");
+   }};
+   try{SmsOutbox.send(c,r,changes());}finally{AtomicFile.afterWrite=null;}
+   check(SmsManager.sent.isEmpty(),"an opt-out during preparation was ignored");
+   check(latest(c).getString("state").equals("cancelled"),"preparation cancellation is recorded");
+  });
   if(!failures.isEmpty())throw new AssertionError(String.join("\n",failures));
   System.out.println("Deep SMS passed: confirmed results and retry/callback interleaving.");
  }
@@ -239,6 +272,13 @@ public class DocumentFlowTest {
   queue.ready();check(events.equals(Arrays.asList("import","result")),"events reach the ready page in order");queue.ready();check(events.size()==2,"ready callback is idempotent");
   queue.post("live");check(events.size()==3,"ready page receives new events");queue.close();queue.post("old Activity");check(events.size()==3,"destroyed page never receives a callback");
   UiEvents destroyedBeforeReady=new UiEvents(events::add);destroyedBeforeReady.post("obsolete");destroyedBeforeReady.close();destroyedBeforeReady.ready();check(events.size()==3,"destroy drops undelivered imports");
+  List<String> oldScreen=new ArrayList<>(),newScreen=new ArrayList<>();UiEvents retained=new UiEvents(oldScreen::add);
+  retained.ready();retained.detach();retained.post("import completed during recreation");retained.ready();
+  check(oldScreen.isEmpty(),"old screen cannot consume a completed background import");
+  retained.attach(newScreen::add);retained.post("export result");check(newScreen.isEmpty(),"new screen must finish loading first");
+  retained.ready();retained.ready();check(newScreen.equals(Arrays.asList("import completed during recreation","export result")),"background results survive reattachment exactly once");
+  retained.detach();retained.post("later import");retained.attach(newScreen::add);retained.ready();check(newScreen.size()==3,"repeated recreation preserves results");
+  retained.close();retained.attach(oldScreen::add);retained.ready();retained.post("finished activity");check(oldScreen.isEmpty(),"finishing an activity closes the retained queue permanently");
   System.out.println("Documents passed: recreated export, cleanup isolation, size/path checks and early WebView result delivery.");
  }
 }"""

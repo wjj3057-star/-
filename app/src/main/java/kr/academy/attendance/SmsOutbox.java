@@ -7,6 +7,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.net.Uri;
+import android.os.SystemClock;
 import android.telephony.SmsManager;
 import android.telephony.SubscriptionManager;
 import android.util.AtomicFile;
@@ -29,6 +30,7 @@ import java.util.UUID;
 /** Durable send journal. Never silently retry a failed or uncertain transmission. */
 public final class SmsOutbox {
     private static final Object LOCK = new Object();
+    private static final String SESSION = UUID.randomUUID().toString();
     private SmsOutbox() {}
     public interface StateReader {
         Object lock();
@@ -126,10 +128,17 @@ public final class SmsOutbox {
         }
         if(error!=null){fail(c,job.getString("id"),error);return 0;}
         final int count=parts.size();
-        synchronized(LOCK){JSONArray jobs=read(c);for(int i=0;i<jobs.length();i++)if(job.getString("id").equals(jobs.getJSONObject(i).getString("id")))jobs.getJSONObject(i).put("parts",count);write(c,jobs);}
         for(int i=0;i<count;i++){
             Intent intent=new Intent(c,SmsResultReceiver.class).setAction(c.getPackageName()+".SMS_SENT").setData(Uri.parse("oneul://sms/"+job.getString("id")+"/"+i)).putExtra("jobId",job.getString("id")).putExtra("part",i);
             sent.add(PendingIntent.getBroadcast(c,0,intent,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE));
+        }
+        synchronized(LOCK){
+            JSONArray jobs=read(c);JSONObject current=null;
+            for(int i=0;i<jobs.length();i++)if(job.getString("id").equals(jobs.getJSONObject(i).getString("id")))current=jobs.getJSONObject(i);
+            if(current==null)throw new java.io.IOException("Missing SMS journal entry");
+            current.put("parts",count).put("requestedAt",System.currentTimeMillis())
+                .put("requestElapsed",SystemClock.elapsedRealtime()).put("requestSession",SESSION);
+            write(c,jobs); // Finish durable preparation before locking settings for handoff.
         }
         }catch(Exception preparationError){
             fail(c,job.getString("id"),"문자 발송을 준비하지 못했어요. SIM·권한·기기 상태를 확인해 주세요.");
@@ -175,6 +184,13 @@ public final class SmsOutbox {
     }
     // A multipart SMS has one result per part. Never label the whole request successful
     // until every part is confirmed; give outstanding callbacks time before offering retry.
+    private static long pendingAge(JSONObject job,long now){
+        // Wall-clock or timezone changes must not enable a duplicate retry in this process.
+        if(SESSION.equals(job.optString("requestSession"))&&job.has("requestElapsed"))
+            return Math.max(0,SystemClock.elapsedRealtime()-job.optLong("requestElapsed"));
+        long age=now-job.optLong("requestedAt",job.optLong("createdAt"));
+        return age<0?120001:age; // After restart, a future timestamp cannot prove a live request.
+    }
     private static void summarize(JSONObject j,long now) throws Exception {
         if("cancelled".equals(j.optString("state"))){j.put("sentParts",0).put("failedParts",0).put("pendingParts",0);return;}
         JSONObject results=j.optJSONObject("results");int parts=j.optInt("parts");
@@ -188,7 +204,7 @@ public final class SmsOutbox {
         }
         j.put("sentParts",sent).put("failedParts",failed).put("pendingParts",Math.max(0,parts-received));
         if(received==0&&!"sending".equals(j.optString("state")))return; // Keep local permission/preflight errors.
-        if(received<parts&&now-j.optLong("createdAt")<=120000){
+        if(received<parts&&pendingAge(j,now)<=120000){
             j.put("state","sending").put("error",failed>0?"일부 분할 문자에 오류가 있어요. 나머지 전송 결과를 기다리고 있어요.":"");
         }else if(failed>0){
             j.put("state",sent>0?"partial":"failed").put("error",reason(failureCode));
@@ -196,7 +212,7 @@ public final class SmsOutbox {
             j.put("state","sent").put("error","");
         }else if(legacy>0){
             j.put("state","unknown").put("error","이전 버전에서 발송 결과를 정확히 기록하지 못했어요. 실제 수신 여부를 확인해 주세요.");
-        }else if(now-j.optLong("createdAt")>120000){
+        }else if(pendingAge(j,now)>120000){
             j.put("state","unknown").put("error","발송 결과 응답이 없어요. 수신 여부를 확인해 주세요.");
         }
     }
@@ -210,7 +226,7 @@ public final class SmsOutbox {
     private static boolean retryable(JSONObject job,long now){
         String state=job.optString("state");
         return "failed".equals(state)||"partial".equals(state)||"unknown".equals(state)||
-            "sending".equals(state)&&now-job.optLong("createdAt")>120000;
+            "sending".equals(state)&&pendingAge(job,now)>120000;
     }
     public static JSONObject logs(Context c) throws Exception {
         synchronized(LOCK){
@@ -250,7 +266,9 @@ public final class SmsOutbox {
                 if("sent".equals(j.optString("state")))throw new Exception("이미 발송 완료된 문자가 있어 재전송하지 않아요.");
                 if(i>oldIndex&&!"cancelled".equals(j.optString("state")))throw new Exception("이미 재전송한 기록이에요. 최신 결과를 확인해 주세요.");
             }
-            retry=new JSONObject(old.toString()).put("id",UUID.randomUUID().toString()).put("createdAt",System.currentTimeMillis()).put("state","sending").put("error","").put("resultVersion",2).put("parts",0).put("results",new JSONObject());jobs.put(retry);write(c,jobs);
+            retry=new JSONObject(old.toString()).put("id",UUID.randomUUID().toString()).put("createdAt",System.currentTimeMillis()).put("state","sending").put("error","").put("resultVersion",2).put("parts",0).put("results",new JSONObject());
+            retry.remove("requestedAt");retry.remove("requestElapsed");retry.remove("requestSession");
+            jobs.put(retry);write(c,jobs);
         }
         int outcome=transmit(c,retry,reader);
         if(outcome<0)throw new Exception("발송 완료 확인 또는 설정·출결·수신 대상 변경으로 재전송을 취소했어요.");

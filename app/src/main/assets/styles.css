@@ -42,3 +42,5 @@
 :root[data-theme=dark] .calendar-day.future{color:#777286}
 :root[data-theme=dark] .sms-state.cancelled{background:var(--subtle);color:var(--muted)}
 .sms-state.partial{background:#fff0eb;color:#a5683f}.sms-state.failed{background:#ffeaec;color:#b83e4e}
+
+.list-pagination{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:18px 0}.list-pagination .hint{text-align:center;margin:0;font-size:11px}.list-pagination button{min-width:55px;flex-shrink:0}

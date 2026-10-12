@@ -10,6 +10,25 @@ function fixture() {
   return C.validate(s);
 }
 const now=new Date(2026,9,8,16,17);
+test('seeded action sequences preserve independent dated records and backup round trips',()=>{
+  // An independent status map checks 4,000 mixed operations, not render snapshots.
+  for(let seed=1;seed<=20;seed++){
+    let random=seed,state=fixture();const model=new Map();
+    const rand=n=>{random=(Math.imul(random,1664525)+1013904223)>>>0;return random%n;};
+    for(let step=0;step<200;step++){
+      const date='2026-10-0'+(1+rand(8)),id=rand(2)?'s1':'s2',status=[...C.STATUSES,'unmarked'][rand(5)],before=JSON.stringify(state);
+      const previous=state;
+      if(rand(5)===0){state=C.markUnmarkedPresent(state,['s1','s2'],date,now);for(const sid of ['s1','s2'])if(!model.has(date+'|'+sid))model.set(date+'|'+sid,'present');}
+      else{state=C.mark(state,id,date,status,undefined,now);if(status==='unmarked')model.delete(date+'|'+id);else model.set(date+'|'+id,status);}
+      assert.equal(JSON.stringify(previous),before,'operations must not mutate saved input');
+      assert.deepEqual(new Map(state.records.map(r=>[r.date+'|'+r.studentId,r.status])),model);
+      assert.equal(state.records.length,model.size,'student/date records stay unique');
+      if(step%10===0){state=C.parseBackup(C.backup(state));assert.deepEqual(C.validate(state),state);}
+      const totals=C.count(C.roster(state,date));const marked=['s1','s2'].filter(sid=>model.has(date+'|'+sid)).length;
+      assert.equal(totals.total,2);assert.equal(totals.unmarked,2-marked);
+    }
+  }
+});
 test('local date validation and midnight boundary',()=>{
   assert.equal(C.validDate('2026-02-30'),false);
   assert.equal(C.validDate('2024-02-29'),true);
