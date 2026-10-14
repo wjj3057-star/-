@@ -44,3 +44,66 @@
 .sms-state.partial{background:#fff0eb;color:#a5683f}.sms-state.failed{background:#ffeaec;color:#b83e4e}
 
 .list-pagination{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:18px 0}.list-pagination .hint{text-align:center;margin:0;font-size:11px}.list-pagination button{min-width:55px;flex-shrink:0}
+
+/* A compact attendance workspace; daily and monthly overviews live in reports. */
+.attendance-shell .topbar{padding:16px 0 18px}
+.attendance-page .page-head{margin-bottom:16px}
+.attendance-page h1{font-size:26px}
+.attendance-page .date-nav{margin-bottom:10px}
+.attendance-page .week-strip{margin-bottom:4px}
+.attendance-controls{position:sticky;top:0;z-index:20;background:var(--bg);padding:8px 0}
+.student-search{background:var(--surface);border:1px solid var(--line);margin:0;min-height:50px;gap:8px;box-shadow:0 2px 6px #24243d03}
+.student-search input{height:48px;font-size:15px;min-width:0}
+.student-search input::-webkit-search-cancel-button{display:none}
+.search-clear{width:44px;height:44px;flex-shrink:0;display:grid;place-items:center;border-radius:10px;color:var(--muted);padding:0}
+.search-clear .icon{width:18px;height:18px}
+.student-search:focus-within{border-color:var(--accent);box-shadow:0 0 0 2px var(--soft)}
+.attendance-controls .list-tools{margin:7px 0 0;min-height:40px}
+.roster-count{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px}
+.roster-count b{font-weight:700}
+.roster-count>span{font-size:10px;color:var(--muted);border-left:1px solid var(--line);padding-left:8px}
+.attendance-controls .text-button{font-size:12px;flex-shrink:0}
+.attendance-main #attendance-list,.attendance-card{scroll-margin-top:128px}
+.attendance-card{padding:14px;border:1px solid var(--line);border-radius:18px}
+.attendance-card .student-top{gap:10px}
+.attendance-card .student-avatar{width:38px;height:38px;border-radius:13px;font-size:14px}
+.attendance-card .student-info h3{font-size:17px}
+.attendance-card .student-info p{color:var(--muted);font-size:11px}
+.attendance-card .student-info{min-height:44px}
+.attendance-card .note-button{width:44px;height:44px;border-radius:12px;flex-shrink:0;color:var(--muted)}
+.attendance-card .note-button.has-note{background:var(--soft);color:var(--accent)}
+.attendance-card .status-row{margin-top:10px;gap:6px}
+.attendance-card .status-button{min-height:46px;font-size:13px;font-weight:700;color:var(--ink);background:var(--subtle);border:1px solid transparent}
+.attendance-card .status-button.selected{border-color:currentColor}
+.attendance-card .status-button.selected.present{background:#e2f3ec;color:#146d52}
+.attendance-card .status-button.selected.late{background:#fff1db;color:#895807}
+.attendance-card .status-button.selected.absent{background:#ffeaec;color:#ac394d}
+.attendance-card .status-button.selected.excused{background:#eeeafa;color:#6944a3}
+.attendance-help{text-align:center;color:var(--muted)}
+.attendance-main .saving-footer{margin-top:12px}
+.daily-summary .section-title{margin-top:0}
+.daily-summary .ring-wrap>div{text-align:center;z-index:1;line-height:1.15}
+.daily-summary .ring-wrap small{display:block;font-size:10px;color:var(--muted);margin-top:4px}
+.daily-progress{border-top:1px solid var(--line);padding-top:12px;margin-top:14px;font-size:12px;color:var(--muted);text-align:center}
+.monthly-title{padding-top:20px;border-top:1px solid var(--line);margin-top:28px}
+:root[data-theme=dark] .student-search{background:var(--surface)}
+:root[data-theme=dark] .attendance-card .status-button.selected.present{background:#193b32;color:var(--green)}
+:root[data-theme=dark] .attendance-card .status-button.selected.late{background:#45351f;color:var(--amber)}
+:root[data-theme=dark] .attendance-card .status-button.selected.absent{background:#43252e;color:var(--red)}
+:root[data-theme=dark] .attendance-card .status-button.selected.excused{background:var(--soft);color:var(--accent)}
+@media(min-width:700px){
+  .attendance-page .date-nav{max-width:420px}
+  .attendance-page .week-strip{max-width:560px;margin:0 auto 8px}
+  .attendance-page .day-pill{min-height:66px}
+  .attendance-main .student-list{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .attendance-controls{padding:12px 0}
+  .attendance-controls .student-search{max-width:540px}
+  .daily-summary{max-width:600px}
+}
+@media(max-width:359px){
+  .attendance-page h1{font-size:24px}
+  .attendance-card{padding:12px}
+  .attendance-card .status-button{font-size:12px}
+  .roster-count{gap:5px}
+  .roster-count>span{padding-left:5px}
+}

@@ -43,7 +43,7 @@ async function main(){
   await click('[data-action=undo]');assert.equal((await read()).records.length,1);
   await click('[data-action=bulk-present]');await click('#confirm-action');
   await page.locator('#attendance-search').fill('지우');assert.equal(await page.locator('.student-card').count(),1);await page.locator('#attendance-search').fill('');
-  await click('[data-action=tab][data-tab=reports]');await page.getByText('100%',{exact:true}).waitFor();
+  await click('[data-action=tab][data-tab=reports]');assert.equal(await page.locator('.report-big').textContent(),'100%');
   const csvPromise=page.waitForEvent('download');await click('[data-action=export-month].icon-button');const csv=await csvPromise;const csvText=fs.readFileSync(await csv.path(),'utf8');assert.ok(csvText.includes('김하늘'));assert.ok(csvText.includes('지각'));assert.ok(csvText.startsWith('\uFEFF'));
   await click('[data-action=tab][data-tab=settings]');const backupPromise=page.waitForEvent('download');await click('[data-action=backup]');const backup=await backupPromise;const backupRaw=fs.readFileSync(await backup.path(),'utf8');assert.equal(C.parseBackup(backupRaw).students.length,2);
   await page.locator('#import-file').setInputFiles({name:'broken.json',mimeType:'application/json',buffer:Buffer.from('{broken')});await page.getByText('읽을 수 없는 백업 파일입니다.',{exact:true}).waitFor();assert.equal((await read()).students.length,2);

@@ -97,16 +97,25 @@
   }
   function classOf(state, id) { return state.classes.find(c => c.id === id); }
   function recordOf(state, id, date) { return state.records.find(r => r.studentId === id && r.date === date); }
+  function matchesStudentName(name, query) {
+    const normalize = value => String(value).normalize('NFC').replace(/\s+/g, '').toLocaleLowerCase();
+    const text = normalize(name), needle = normalize(query);
+    if (!needle || text.includes(needle)) return true;
+    const initials = [...text].map(ch => {
+      const code = ch.charCodeAt(0) - 0xac00;
+      return code >= 0 && code <= 11171 ? 'ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ'[Math.floor(code / 588)] : ch;
+    }).join('');
+    return /^[ㄱ-ㅎ]+$/.test(needle) && initials.includes(needle);
+  }
   function roster(state, date, _classId = 'all', _scheduledOnly = true, query = '') {
     const records = new Map(state.records.filter(r => r.date === date).map(r => [r.studentId, r]));
-    const needle = query.trim().toLocaleLowerCase();
     const group = classOf(state, DEFAULT_CLASS_ID) || singleClass();
     return state.students.map(s => {
       const r = records.get(s.id);
       const eligible = s.joinedDate <= date && (s.active || (s.archivedDate && date < s.archivedDate));
       if (!r && !eligible) return null;
       const name = r ? r.studentName : s.name;
-      if (needle && !name.toLocaleLowerCase().includes(needle)) return null;
+      if (!matchesStudentName(name, query)) return null;
       return {student:s, group, record:r || null, name, groupName:''};
     }).filter(Boolean).sort((a,b) => a.name.localeCompare(b.name, 'ko'));
   }
@@ -246,5 +255,5 @@
     const prior=new Map(before.records.map(r=>[r.studentId+'|'+r.date,r]));
     return after.records.filter(r=>r.date===today&&after.settings.sms.statuses.includes(r.status)&&(!prior.has(r.studentId+'|'+r.date)||prior.get(r.studentId+'|'+r.date).status!==r.status)&&after.students.some(s=>s.id===r.studentId&&s.active&&s.guardians.some(g=>g.notify))).map(r=>({studentId:r.studentId,date:r.date,status:r.status,updatedAt:r.updatedAt}));
   }
-  return {MAX_BACKUP_BYTES,STATUSES,LABELS,DEFAULT_TEMPLATE,DEFAULT_KEYWORDS,DEFAULT_CLASS_ID,TOKENS,normalizePhone,nameKey,parseContactName,contactCandidates,mergeCandidates,renderSms,smsChanges,clone,localDate,validDate,shiftDate,uid,fresh,upgrade,validate,classOf,recordOf,roster,count,mark,markUnmarkedPresent,report,csv,csvCell,backup,parseBackup};
+  return {MAX_BACKUP_BYTES,STATUSES,LABELS,DEFAULT_TEMPLATE,DEFAULT_KEYWORDS,DEFAULT_CLASS_ID,TOKENS,normalizePhone,nameKey,parseContactName,contactCandidates,mergeCandidates,renderSms,smsChanges,clone,localDate,validDate,shiftDate,uid,fresh,upgrade,validate,classOf,recordOf,matchesStudentName,roster,count,mark,markUnmarkedPresent,report,csv,csvCell,backup,parseBackup};
 });

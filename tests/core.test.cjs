@@ -10,6 +10,18 @@ function fixture() {
   return C.validate(s);
 }
 const now=new Date(2026,9,8,16,17);
+test('student search accepts Korean initials, spacing and normalized names without changing order',()=>{
+  assert.equal(C.matchesStudentName('김하늘','ㄱㅎ'),true);
+  assert.equal(C.matchesStudentName('김하늘','김 하'),true);
+  assert.equal(C.matchesStudentName('김하늘'.normalize('NFD'),'하늘'),true);
+  assert.equal(C.matchesStudentName('Alice Kim','alice'),true);
+  assert.equal(C.matchesStudentName('박지우','ㄱㅎ'),false);
+  assert.equal(C.matchesStudentName('최도윤','ㅊㄷㅇ'),true);
+  assert.equal(C.matchesStudentName('김하늘','.*'),false);
+  const s=fixture();s.students.reverse();
+  assert.deepEqual(C.roster(s,'2026-10-08').map(r=>r.name),['김하늘','박지우']);
+  assert.deepEqual(C.roster(s,'2026-10-08','all',false,'ㅂㅈ').map(r=>r.student.id),['s2']);
+});
 test('seeded action sequences preserve independent dated records and backup round trips',()=>{
   // An independent status map checks 4,000 mixed operations, not render snapshots.
   for(let seed=1;seed<=20;seed++){
