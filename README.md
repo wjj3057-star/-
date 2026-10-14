@@ -2,9 +2,18 @@
 
 학원 선생님이 **반 구분 없이 전체 학생의 출석을 관리**하고, 학부모에게 출석 SMS를 보낼 수 있는 Android 앱입니다.
 
-- 버전: **1.4.0** (`versionCode 10`)
+- 버전: **1.4.1** (`versionCode 11`)
 - 한국어 UI, Android 8.0 (API 26) 이상
 - 기기 내부 저장 방식으로 인터넷, 계정, 외부 서버 불필요
+
+## 1.4.1 전체 검토 수정 사항
+
+- 이미 출석을 체크한 학생의 이름을 바꿔도 새 이름으로 검색되고 현재 이름 기준 가나다순을 유지합니다. 저장된 기록 이름도 검색할 수 있으며 과거 기록과 CSV의 이름은 유지합니다.
+- 키보드로 출석을 체크한 뒤에도 같은 학생의 상태 버튼에 초점을 유지합니다.
+- 설정을 자동 저장한 뒤 사용할 수 없게 된 이전 `되돌리기` 버튼을 제거합니다. 설정 저장이 실패하면 이전 출석의 되돌리기는 유지합니다.
+- `--keystore`로 지정한 키가 없으면 빌드를 중단합니다. 경로 오타로 새 서명키가 만들어져 업데이트가 불가능해지는 일을 방지합니다.
+
+검토 범위와 검증 결과: [1.4.1 검토 기록](docs/REVIEW-1.4.1.md).
 
 ## 1.4.0 출석 중심 화면 개편
 
@@ -143,6 +152,8 @@ tests/audit-ui.cjs          날짜 입력·전체 연락처 선택·재시도·�
 tests/deep-audit-ui.cjs     지연된 연락처·대량 등록·페이지 입력 보존·검색 회귀 테스트
 tests/scale-ui.cjs          5,000명 목록·페이지 이동·전체/검색 일괄 출석·되돌리기 테스트
 tests/attendance-layout-ui.cjs 첫 화면·초성 검색·가나다순·일별 통계·모바일 배치 테스트
+tests/post-ui-audit.cjs     이름 변경·키보드 초점·저장 성공/실패 후 되돌리기 테스트
+tests/build_cli.py          누락된 업데이트 서명키 차단·기존 출력 보존 테스트
 ```
 
 WebView에는 번들 로컬 자산만 로드합니다. 외부 페이지 탐색은 차단하고, HTML 문자열은 이스케이프합니다. 출석 데이터는 앱 전용 디렉터리에 `AtomicFile`로 저장됩니다. 런타임 외부 라이브러리는 없습니다.
@@ -160,7 +171,7 @@ APK 출력: `out\AcademyAttendance.apk`
 
 Android Studio를 사용할 경우 Gradle 8.9 / Android Gradle Plugin 8.7.3으로 빌드할 수 있습니다.
 
-**배포 서명:** 채팅에서 제공한 1.4.0 APK는 1.3.3과 같은 서명입니다. 1.2.0 APK와는 서명이 달라 덮어쓰기 업데이트할 수 없습니다. 1.2.0을 사용하는 경우 기존 앱의 설정에서 JSON 전체 백업을 저장한 뒤 설치·복원해야 합니다. 백업 전에는 기존 앱을 삭제하지 마세요.
+**배포 서명:** 채팅에서 제공한 1.4.1 APK는 1.4.0·1.3.3과 같은 서명입니다. 1.2.0 APK와는 서명이 달라 덮어쓰기 업데이트할 수 없습니다. 1.2.0을 사용하는 경우 기존 앱의 설정에서 JSON 전체 백업을 저장한 뒤 설치·복원해야 합니다. 백업 전에는 기존 앱을 삭제하지 마세요.
 
 **업데이트 주의:** 기기에 설치된 기존 앱의 데이터를 유지하려면 이전 APK와 **동일한 서명 키**를 사용해야 합니다. 신규 설치용 임시 키와 기존 배포 키는 서로 교환할 수 없습니다. GitHub Actions의 테스트 APK는 실행마다 새 임시 키로 서명되므로 기존 설치본 업데이트용으로 사용하지 마세요. 원래 APK의 서명 키를 보관한 상태에서 `--keystore` 옵션으로 재사용하세요.
 
@@ -168,10 +179,13 @@ Android Studio를 사용할 경우 Gradle 8.9 / Android Gradle Plugin 8.7.3으�
 python .\scripts\build_apk.py --keystore "C:\MyPrivateKeys\AcademyAttendance-signing.keystore"
 ```
 
+지정한 키 파일이 없으면 빌드를 중단하며 기존 APK는 덮어쓰지 않습니다. 새 앱 서명을 의도적으로 만드는 경우에만 `--create-keystore`를 함께 지정하세요. `--keystore`를 생략한 로컬 개발 빌드는 기존처럼 기본 개발 키를 생성하거나 재사용합니다.
+
 ## 테스트 (PowerShell)
 
 ```powershell
 node --test .\tests\core.test.cjs .\tests\contacts-sms.test.cjs
+python .\tests\build_cli.py
 node --check .\app\src\main\assets\core.js
 node --check .\app\src\main\assets\app.js
 node --check .\app\src\main\assets\contacts-sms.js
@@ -193,6 +207,7 @@ node .\tests\audit-ui.cjs
 node .\tests\deep-audit-ui.cjs
 node .\tests\scale-ui.cjs
 node .\tests\attendance-layout-ui.cjs
+node .\tests\post-ui-audit.cjs
 ```
 
 네이티브 회귀 테스트는 JDK 17과 테스트 전용 org.json 20240303 JAR를 사용합니다. CI는 의존성을 내려받은 뒤 `python tests/native_sms.py --json-jar <jar 경로>`로 실제 문자 수신기·발송 큐·저장소·파일 전달 코드를 모의 Android 환경에서 실행합니다. 실제 문자는 보내지 않습니다.

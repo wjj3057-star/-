@@ -42,8 +42,11 @@ jobs:
           node --check tests/deep-audit-ui.cjs
           node --check tests/scale-ui.cjs
           node --check tests/attendance-layout-ui.cjs
+          node --check tests/post-ui-audit.cjs
       - name: Node unit tests
         run: node --test tests/core.test.cjs tests/contacts-sms.test.cjs
+      - name: Signing key guard regression
+        run: python tests/build_cli.py
       - name: SMS rules Java unit tests
         run: |
           mkdir -p out/sms-tests
@@ -68,6 +71,7 @@ jobs:
           node tests/deep-audit-ui.cjs
           node tests/scale-ui.cjs
           node tests/attendance-layout-ui.cjs
+          node tests/post-ui-audit.cjs
       - name: Configure Android SDK
         uses: android-actions/setup-android@v4
       - name: Install Android SDK 35
@@ -76,10 +80,10 @@ jobs:
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platforms;android-35" "build-tools;35.0.0"
       - name: Build and verify test APK
-        run: python scripts/build_apk.py --output out/AcademyAttendance-1.4.0.apk
+        run: python scripts/build_apk.py --output out/AcademyAttendance-1.4.1.apk
       - name: Publish test build
         uses: actions/upload-artifact@v4
         with:
-          name: academy-attendance-1.4.0-ci-test-install-only
-          path: out/AcademyAttendance-1.4.0.apk
+          name: academy-attendance-1.4.1-ci-test-install-only
+          path: out/AcademyAttendance-1.4.1.apk
           retention-days: 7

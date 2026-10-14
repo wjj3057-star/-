@@ -59,6 +59,7 @@
       } else localStorage.setItem('oneul-attendance-v1', raw);
       undoState = undo ? C.clone(state) : null;
       state = next; ui.showArchived=state.settings.showArchived; loadError = ''; applyTheme(); render();
+      if(!undoState)$('#toast .toast-undo')?.remove();
       if (message) toast(message, undo); return true;
     } catch (error) { const message=error.message||'저장하지 못했습니다. 다시 시도해 주세요.';if($('#form-error'))formError(message);else toast(message);return false; }
   }
@@ -99,7 +100,7 @@
     if (!rows.length) return empty(ui.query?'검색 결과가 없어요':'이 날짜의 학생이 없어요',ui.query?'학생 이름을 다시 확인해 주세요.':'학생의 등록일과 보관 상태를 확인해 주세요.');
     return `<div class="student-list">${pageRows(rows,'attendancePage').map(row=>{
       const {student:s,record:r}=row, st=r?r.status:'unmarked';
-      return `<article class="student-card attendance-card" data-student="${e(s.id)}"><div class="student-top"><div class="student-avatar" >${e(row.name.slice(0,1))}</div><button class="student-info" data-action="student-detail" data-id="${e(s.id)}" aria-label="${e(row.name)} 기록 보기"><h3>${e(row.name)}</h3><p>${r?C.LABELS[r.status]+(r.time?' · '+e(r.time):''):'아래 버튼으로 출석을 체크하세요'}</p></button><button class="note-button ${r&&r.note?'has-note':''}" data-action="record-note" data-id="${e(s.id)}" aria-label="${e(row.name)} 출석 메모">${icon('note')}</button></div><div class="status-row" role="group" aria-label="${e(row.name)} 출석 상태">${C.STATUSES.map(status=>`<button class="status-button ${status} ${st===status?'selected':''}" data-action="mark" data-id="${e(s.id)}" data-status="${status}" aria-pressed="${st===status}" ${ui.date>today?'disabled':''}>${icon('check')}${C.LABELS[status]}</button>`).join('')}</div>${r&&r.note?`<p class="record-note">${e(r.note)}</p>`:''}</article>`;
+      return `<article class="student-card attendance-card" data-student="${e(s.id)}"><div class="student-top"><div class="student-avatar" >${e(row.name.slice(0,1))}</div><button class="student-info" data-action="student-detail" data-id="${e(s.id)}" aria-label="${e(row.name)} 기록 보기"><h3>${e(row.name)}</h3><p>${r?C.LABELS[r.status]+(r.time?' · '+e(r.time):''):'아래 버튼으로 출석을 체크하세요'}</p>${r&&r.studentName!==s.name?`<p>기록 이름: ${e(r.studentName)}</p>`:''}</button><button class="note-button ${r&&r.note?'has-note':''}" data-action="record-note" data-id="${e(s.id)}" aria-label="${e(row.name)} 출석 메모">${icon('note')}</button></div><div class="status-row" role="group" aria-label="${e(row.name)} 출석 상태">${C.STATUSES.map(status=>`<button class="status-button ${status} ${st===status?'selected':''}" data-action="mark" data-id="${e(s.id)}" data-status="${status}" aria-pressed="${st===status}" ${ui.date>today?'disabled':''}>${icon('check')}${C.LABELS[status]}</button>`).join('')}</div>${r&&r.note?`<p class="record-note">${e(r.note)}</p>`:''}</article>`;
     }).join('')}</div>`+listPager(rows.length,'attendancePage','출석부');
   }
   function students() {
@@ -123,7 +124,7 @@
   }
   function settings() {
     const settingsRow=(action,im,label,sub)=>`<button class="settings-row" data-action="${action}"><span class="settings-icon">${icon(im)}</span><span class="settings-label"><b>${e(label)}</b><small>${e(sub)}</small></span>${icon('right')}</button>`;
-    return head('설정','우리 학원에 맞게 관리해 보세요')+`<div class="settings-layout"><section><div class="settings-title">학원 정보</div><div class="settings-card">${settingsRow('academy-edit','home',state.settings.academy,state.settings.teacher?state.settings.teacher+' 선생님':'학원 이름과 선생님 이름 설정')}</div><div class="settings-title">화면 설정</div><div class="settings-card">${settingsRow('theme-edit','settings','화면 테마',themeLabels[state.settings.theme])}</div><div class="settings-title">출석 관리</div><div class="white-card"><div class="row" style="color:var(--accent);margin-bottom:11px">${icon('calendar')}<h3>매일 자정 자동 초기화</h3></div><p class="modal-copy">매일 오전 0시에 새로운 출석부로 전환되어 모든 학생이 미출석으로 표시돼요. 어제까지의 출결 기록은 삭제되지 않고 출석 기록에서 조회할 수 있어요.</p></div></section><section>${window.ContactSms?window.ContactSms.settingsHTML():''}<div class="settings-title">데이터 관리</div><div class="settings-card">${settingsRow('backup','download','전체 데이터 백업','학생·출석 기록을 JSON 파일로 저장')}${settingsRow('import','upload','백업 파일 복원','저장해 둔 백업으로 현재 데이터를 교체')}${settingsRow('export-all','chart','전체 출석 기록 내보내기','엑셀에서 열 수 있는 CSV 파일로 저장')}</div><div class="white-card"><div class="row" style="color:var(--accent);margin-bottom:11px">${icon('shield')}<h3>이 기기에 안전하게 보관</h3></div><p class="modal-copy">학생 정보와 출석 기록은 이 기기에 저장돼요. 연락처 연동은 읽기 권한을, 학부모 문자는 SMS 권한과 문자 발송이 가능한 SIM을 사용해요. 다른 기기와 자동 동기화되지 않아요.</p><p class="hint">기기를 바꾸거나 앱을 삭제하기 전에 전체 데이터를 백업해 주세요.</p></div><p class="hint" style="text-align:center">오늘출석 1.4.0</p></section></div>`;
+    return head('설정','우리 학원에 맞게 관리해 보세요')+`<div class="settings-layout"><section><div class="settings-title">학원 정보</div><div class="settings-card">${settingsRow('academy-edit','home',state.settings.academy,state.settings.teacher?state.settings.teacher+' 선생님':'학원 이름과 선생님 이름 설정')}</div><div class="settings-title">화면 설정</div><div class="settings-card">${settingsRow('theme-edit','settings','화면 테마',themeLabels[state.settings.theme])}</div><div class="settings-title">출석 관리</div><div class="white-card"><div class="row" style="color:var(--accent);margin-bottom:11px">${icon('calendar')}<h3>매일 자정 자동 초기화</h3></div><p class="modal-copy">매일 오전 0시에 새로운 출석부로 전환되어 모든 학생이 미출석으로 표시돼요. 어제까지의 출결 기록은 삭제되지 않고 출석 기록에서 조회할 수 있어요.</p></div></section><section>${window.ContactSms?window.ContactSms.settingsHTML():''}<div class="settings-title">데이터 관리</div><div class="settings-card">${settingsRow('backup','download','전체 데이터 백업','학생·출석 기록을 JSON 파일로 저장')}${settingsRow('import','upload','백업 파일 복원','저장해 둔 백업으로 현재 데이터를 교체')}${settingsRow('export-all','chart','전체 출석 기록 내보내기','엑셀에서 열 수 있는 CSV 파일로 저장')}</div><div class="white-card"><div class="row" style="color:var(--accent);margin-bottom:11px">${icon('shield')}<h3>이 기기에 안전하게 보관</h3></div><p class="modal-copy">학생 정보와 출석 기록은 이 기기에 저장돼요. 연락처 연동은 읽기 권한을, 학부모 문자는 SMS 권한과 문자 발송이 가능한 SIM을 사용해요. 다른 기기와 자동 동기화되지 않아요.</p><p class="hint">기기를 바꾸거나 앱을 삭제하기 전에 전체 데이터를 백업해 주세요.</p></div><p class="hint" style="text-align:center">오늘출석 1.4.1</p></section></div>`;
   }
   function modal(title, body, onSubmit) {
     if(window.ContactSms&&window.ContactSms.onModalReplace)window.ContactSms.onModalReplace();
@@ -197,7 +198,15 @@
       $('#restore-confirm').addEventListener('click',()=>{if(!$('#restore-consent').checked)return;const restored=importData;if(save(restored,'백업 데이터를 복원했어요.')){closeModal();render();}});
     }catch(error){toast(error.message);}
   }
-  function markStudent(id,status){try {const old=C.recordOf(state,id,ui.date);if(saveAttendance(C.mark(state,id,ui.date,status=== (old&&old.status)?'unmarked':status),status===(old&&old.status)?'미출석으로 되돌렸어요.':`${C.LABELS[status]}으로 저장했어요.`)){} }catch(error){toast(error.message);}}
+  function markStudent(id,status){
+    try {
+      const old=C.recordOf(state,id,ui.date);
+      if(saveAttendance(C.mark(state,id,ui.date,status===(old&&old.status)?'unmarked':status),status===(old&&old.status)?'미출석으로 되돌렸어요.':`${C.LABELS[status]}으로 저장했어요.`)){
+        const button=[...document.querySelectorAll('#attendance-list [data-action=mark]')].find(b=>b.dataset.id===id&&b.dataset.status===status);
+        if(button)button.focus({preventScroll:true});
+      }
+    }catch(error){toast(error.message);}
+  }
   function setDate(date,studentId=''){
     if(!C.validDate(date))return;
     ui.date=date;ui.query='';ui.attendancePage=0;

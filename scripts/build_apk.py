@@ -15,9 +15,13 @@ def run(*args):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--sdk', default=os.environ.get('ANDROID_HOME') or os.environ.get('ANDROID_SDK_ROOT'))
-    parser.add_argument('--keystore', default=str(Path.home() / '.android' / 'academy-attendance-debug.keystore'))
+    parser.add_argument('--keystore', help='Existing signing key for an update build.')
+    parser.add_argument('--create-keystore', action='store_true', help='Explicitly allow creating a new signing key; it cannot update apps signed with another key.')
     parser.add_argument('--output', default=str(ROOT / 'out' / 'AcademyAttendance.apk'))
     args = parser.parse_args()
+    key = Path(args.keystore or Path.home() / '.android' / 'academy-attendance-debug.keystore').resolve()
+    if args.keystore and not key.is_file() and not args.create_keystore:
+        parser.error('The specified signing key does not exist. Restore the original keystore for an update build. Use --create-keystore only for an intentional new signing identity.')
     if not args.sdk:
         parser.error('Set ANDROID_HOME or pass --sdk (Android SDK Platform 35 + Build Tools 35.0.0).')
     sdk = Path(args.sdk)
@@ -56,7 +60,6 @@ def main():
             apk.write(file, file.name)
     aligned = build / 'aligned.apk'
     run(exe('zipalign'), '-f', '-p', '4', unsigned, aligned)
-    key = Path(args.keystore).resolve()
     # This is a private, locally generated development key. Never commit it.
     # Reuse the same key for updates so Android can retain the installed app's data.
     if not key.exists():

@@ -22,6 +22,18 @@ test('student search accepts Korean initials, spacing and normalized names witho
   assert.deepEqual(C.roster(s,'2026-10-08').map(r=>r.name),['김하늘','박지우']);
   assert.deepEqual(C.roster(s,'2026-10-08','all',false,'ㅂㅈ').map(r=>r.student.id),['s2']);
 });
+test('renamed checked students use current names for ordering and retain historical search aliases',()=>{
+  const s=C.mark(fixture(),'s1','2026-10-08','present','이전 기록',now);
+  s.students[0].name='한가람';
+  const snapshot=JSON.stringify(s.records);
+  assert.deepEqual(C.roster(s,'2026-10-08').map(r=>r.name),['박지우','한가람']);
+  for(const query of ['한가람','ㅎㄱ','김하늘','ㄱㅎ']){
+    assert.deepEqual(C.roster(s,'2026-10-08','all',false,query).map(r=>r.student.id),['s1']);
+  }
+  assert.equal(C.report(s,'2026-10').records[0].studentName,'김하늘');
+  assert.equal(JSON.stringify(s.records),snapshot);
+  assert.deepEqual(C.roster(s,'2026-10-09','all',false,'한가람').map(r=>r.student.id),['s1']);
+});
 test('seeded action sequences preserve independent dated records and backup round trips',()=>{
   // An independent status map checks 4,000 mixed operations, not render snapshots.
   for(let seed=1;seed<=20;seed++){

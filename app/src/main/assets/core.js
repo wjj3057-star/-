@@ -114,8 +114,10 @@
       const r = records.get(s.id);
       const eligible = s.joinedDate <= date && (s.active || (s.archivedDate && date < s.archivedDate));
       if (!r && !eligible) return null;
-      const name = r ? r.studentName : s.name;
-      if (!matchesStudentName(name, query)) return null;
+      // Use current student names for the roster and ordering. Saved records keep
+      // their original names, which also remain searchable as historical aliases.
+      const name = s.name;
+      if (!matchesStudentName(name, query) && !(r && matchesStudentName(r.studentName, query))) return null;
       return {student:s, group, record:r || null, name, groupName:''};
     }).filter(Boolean).sort((a,b) => a.name.localeCompare(b.name, 'ko'));
   }
