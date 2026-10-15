@@ -17,7 +17,7 @@
   };
   const icon = name => `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">${paths[name] || paths.check}</svg>`;
   const native = window.NativeAttendance || null;
-  let state, loadError = '', lastFocus = null, undoState = null, toastTimer, importData = null;
+  let state, loadError = '', lastFocus = null, undoState = null, toastTimer, importData = null, pendingImport = null;
   let today = C.localDate();
   const PAGE_SIZE=50;
   const ui = {tab:'attendance',date:today,query:'',studentQuery:'',showArchived:false,month:today.slice(0,7),reportDate:today,attendancePage:0,studentPage:0,reportPage:0};
@@ -124,7 +124,7 @@
   }
   function settings() {
     const settingsRow=(action,im,label,sub)=>`<button class="settings-row" data-action="${action}"><span class="settings-icon">${icon(im)}</span><span class="settings-label"><b>${e(label)}</b><small>${e(sub)}</small></span>${icon('right')}</button>`;
-    return head('설정','우리 학원에 맞게 관리해 보세요')+`<div class="settings-layout"><section><div class="settings-title">학원 정보</div><div class="settings-card">${settingsRow('academy-edit','home',state.settings.academy,state.settings.teacher?state.settings.teacher+' 선생님':'학원 이름과 선생님 이름 설정')}</div><div class="settings-title">화면 설정</div><div class="settings-card">${settingsRow('theme-edit','settings','화면 테마',themeLabels[state.settings.theme])}</div><div class="settings-title">출석 관리</div><div class="white-card"><div class="row" style="color:var(--accent);margin-bottom:11px">${icon('calendar')}<h3>매일 자정 자동 초기화</h3></div><p class="modal-copy">매일 오전 0시에 새로운 출석부로 전환되어 모든 학생이 미출석으로 표시돼요. 어제까지의 출결 기록은 삭제되지 않고 출석 기록에서 조회할 수 있어요.</p></div></section><section>${window.ContactSms?window.ContactSms.settingsHTML():''}<div class="settings-title">데이터 관리</div><div class="settings-card">${settingsRow('backup','download','전체 데이터 백업','학생·출석 기록을 JSON 파일로 저장')}${settingsRow('import','upload','백업 파일 복원','저장해 둔 백업으로 현재 데이터를 교체')}${settingsRow('export-all','chart','전체 출석 기록 내보내기','엑셀에서 열 수 있는 CSV 파일로 저장')}</div><div class="white-card"><div class="row" style="color:var(--accent);margin-bottom:11px">${icon('shield')}<h3>이 기기에 안전하게 보관</h3></div><p class="modal-copy">학생 정보와 출석 기록은 이 기기에 저장돼요. 연락처 연동은 읽기 권한을, 학부모 문자는 SMS 권한과 문자 발송이 가능한 SIM을 사용해요. 다른 기기와 자동 동기화되지 않아요.</p><p class="hint">기기를 바꾸거나 앱을 삭제하기 전에 전체 데이터를 백업해 주세요.</p></div><p class="hint" style="text-align:center">오늘출석 1.4.1</p></section></div>`;
+    return head('설정','우리 학원에 맞게 관리해 보세요')+`<div class="settings-layout"><section><div class="settings-title">학원 정보</div><div class="settings-card">${settingsRow('academy-edit','home',state.settings.academy,state.settings.teacher?state.settings.teacher+' 선생님':'학원 이름과 선생님 이름 설정')}</div><div class="settings-title">화면 설정</div><div class="settings-card">${settingsRow('theme-edit','settings','화면 테마',themeLabels[state.settings.theme])}</div><div class="settings-title">출석 관리</div><div class="white-card"><div class="row" style="color:var(--accent);margin-bottom:11px">${icon('calendar')}<h3>매일 자정 자동 초기화</h3></div><p class="modal-copy">매일 오전 0시에 새로운 출석부로 전환되어 모든 학생이 미출석으로 표시돼요. 어제까지의 출결 기록은 삭제되지 않고 출석 기록에서 조회할 수 있어요.</p></div></section><section>${window.ContactSms?window.ContactSms.settingsHTML():''}<div class="settings-title">데이터 관리</div><div class="settings-card">${settingsRow('backup','download','전체 데이터 백업','학생·출석 기록을 JSON 파일로 저장')}${settingsRow('import','upload','백업 파일 복원','저장해 둔 백업으로 현재 데이터를 교체')}${settingsRow('export-all','chart','전체 출석 기록 내보내기','엑셀에서 열 수 있는 CSV 파일로 저장')}</div><div class="white-card"><div class="row" style="color:var(--accent);margin-bottom:11px">${icon('shield')}<h3>이 기기에 안전하게 보관</h3></div><p class="modal-copy">학생 정보와 출석 기록은 이 기기에 저장돼요. 연락처 연동은 읽기 권한을, 학부모 문자는 SMS 권한과 문자 발송이 가능한 SIM을 사용해요. 다른 기기와 자동 동기화되지 않아요.</p><p class="hint">기기를 바꾸거나 앱을 삭제하기 전에 전체 데이터를 백업해 주세요.</p></div><p class="hint" style="text-align:center">오늘출석 1.4.2</p></section></div>`;
   }
   function modal(title, body, onSubmit) {
     if(window.ContactSms&&window.ContactSms.onModalReplace)window.ContactSms.onModalReplace();
@@ -134,7 +134,15 @@
     const form=$('#modal-root form');if(form&&onSubmit)form.addEventListener('submit',ev=>{ev.preventDefault();onResume();if(form.isConnected)onSubmit(new FormData(form),form);});
     $('.modal').focus();
   }
-  function closeModal(){ if(window.ContactSms)window.ContactSms.onClose();$('#modal-root').innerHTML='';document.body.style.overflow='';if(lastFocus&&lastFocus.isConnected)lastFocus.focus();importData=null; }
+  function closeModal(){
+    if(window.ContactSms)window.ContactSms.onClose();
+    $('#modal-root').innerHTML='';document.body.style.overflow='';
+    if(lastFocus&&lastFocus.isConnected)lastFocus.focus();importData=null;
+    // Finish the current action first: it may open a different dialog itself.
+    Promise.resolve().then(()=>{
+      if(pendingImport&&!$('.modal')){const next=pendingImport;pendingImport=null;showImport(next);}
+    });
+  }
   function formError(message){const target=$('#form-error');if(target){target.textContent=message;target.classList.add('visible');target.scrollIntoView({block:'nearest'});}else toast(message);}
   const errorSlot='<div id="form-error" class="form-error" role="alert"></div>';
   function confirmDialog(title,message,label,callback,danger=false){
@@ -192,11 +200,20 @@
   function requestImport(){if(native)native.importFile();else{$('#import-file').value='';$('#import-file').click();}}
   function handleImport(raw){
     try {
-      const next=C.parseBackup(raw);next.settings.sms.enabled=false;importData=next;
-      modal('백업을 복원할까요?',`<p class="modal-copy">${e(next.settings.academy)}\n학생 ${next.students.length}명 \n출석 기록 ${next.records.length}건\n\n현재 데이터를 이 백업으로 교체해요. 복원 전 현재 데이터의 백업을 권장해요. 문자 자동 발송은 꺼진 상태로 복원돼요.</p><label class="check-row"><input id="restore-consent" type="checkbox">현재 데이터가 교체되는 것을 확인했어요.</label><div class="modal-actions"><button class="secondary" data-action="close">취소</button><button class="primary" id="restore-confirm" disabled>복원하기</button></div>`);
-      $('#restore-consent').addEventListener('change',ev=>$('#restore-confirm').disabled=!ev.target.checked);
-      $('#restore-confirm').addEventListener('click',()=>{if(!$('#restore-consent').checked)return;const restored=importData;if(save(restored,'백업 데이터를 복원했어요.')){closeModal();render();}});
+      const next=C.parseBackup(raw);next.settings.sms.enabled=false;
+      if($('.modal')){
+        pendingImport=next;
+        toast('백업을 읽었어요. 현재 창을 닫으면 복원 내용을 확인할 수 있어요.');
+        return;
+      }
+      showImport(next);
     }catch(error){toast(error.message);}
+  }
+  function showImport(next){
+    importData=next;
+    modal('백업을 복원할까요?',`<p class="modal-copy">${e(next.settings.academy)}\n학생 ${next.students.length}명 \n출석 기록 ${next.records.length}건\n\n현재 데이터를 이 백업으로 교체해요. 복원 전 현재 데이터의 백업을 권장해요. 문자 자동 발송은 꺼진 상태로 복원돼요.</p><label class="check-row"><input id="restore-consent" type="checkbox">현재 데이터가 교체되는 것을 확인했어요.</label><div class="modal-actions"><button class="secondary" data-action="close">취소</button><button class="primary" id="restore-confirm" disabled>복원하기</button></div>`);
+    $('#restore-consent').addEventListener('change',ev=>$('#restore-confirm').disabled=!ev.target.checked);
+    $('#restore-confirm').addEventListener('click',()=>{if(!$('#restore-consent').checked)return;const restored=importData;if(save(restored,'백업 데이터를 복원했어요.')){closeModal();render();}});
   }
   function markStudent(id,status){
     try {

@@ -24,12 +24,12 @@
   }
   function guardianCard(g={},index=guardianSequence++){
     const role=g.relation||'guardian';
-    return `<div class="guardian-card" data-guardian="${index}"><input type="hidden" name="g-id-${index}" value="${e(g.id||C.uid())}"><input type="hidden" name="g-contact-${index}" value="${e(g.contactId||'')}"><div class="row between"><select name="g-relation-${index}" aria-label="학부모 관계">${['mother','father','guardian'].map(r=>`<option value="${r}" ${r===role?'selected':''}>${relations[r]}</option>`).join('')}</select><button type="button" class="text-button small-button" data-contact-action="pick" data-target="guardian-${index}">${A.icon('users')} 연락처 선택</button><button type="button" class="icon-button" data-contact-action="remove-guardian" aria-label="학부모 연락처 삭제">${A.icon('close')}</button></div><label class="field"><span>학부모 이름</span><input name="g-name-${index}" maxlength="80" value="${e(g.name||'')}" placeholder="예: 김하늘 어머니"></label><label class="field"><span>학부모 전화번호</span><input name="g-phone-${index}" type="tel" inputmode="tel" maxlength="30" value="${e(g.phone||'')}" placeholder="010-0000-0000"></label><label class="toggle"><input name="g-notify-${index}" type="checkbox" ${g.notify!==false?'checked':''}>이 학부모에게 출석 문자 보내기</label></div>`;
+    return `<div class="guardian-card" data-guardian="${index}"><input type="hidden" name="g-id-${index}" value="${e(g.id||C.uid())}"><input type="hidden" name="g-contact-${index}" value="${e(g.contactId||'')}"><div class="row between"><select name="g-relation-${index}" aria-label="학부모 관계">${['mother','father','guardian'].map(r=>`<option value="${r}" ${r===role?'selected':''}>${relations[r]}</option>`).join('')}</select><button type="button" class="text-button small-button" data-contact-action="pick" data-target="guardian-${index}">${A.icon('users')} 연락처 선택</button><button type="button" class="icon-button" data-contact-action="remove-guardian" aria-label="학부모 연락처 삭제">${A.icon('close')}</button></div><label class="field"><span>학부모 이름</span><input name="g-name-${index}" maxlength="80" value="${e(g.name||'')}" placeholder="예: 김하늘 어머니"></label><label class="field"><span>학부모 전화번호</span><input name="g-phone-${index}" type="tel" inputmode="tel" maxlength="30" value="${e(g.phone||'')}" placeholder="010-0000-0000"></label><label class="toggle"><input name="g-notify-${index}" type="checkbox" ${g.notify!==false?'checked':''}>이 학부모에게 출석 문자 보내기</label><p class="hint" data-guardian-save-state role="status" hidden></p></div>`;
   }
   function fields(s){
     guardianSequence=0;
     const list=s.guardians&&s.guardians.length?s.guardians:[{relation:'mother'},{relation:'father'}];
-    return `<section class="contact-fields" data-edit-student="${e(s.id||'')}"><div class="section-title"><h3>학생 연락처</h3><button type="button" class="text-button" data-contact-action="pick" data-target="student">${A.icon('users')} 연락처 선택</button></div><input type="hidden" name="contactId" value="${e(s.contactId||'')}"><label class="field"><span>학생 전화번호 <small style="display:inline">선택</small></span><input name="phone" type="tel" inputmode="tel" maxlength="30" value="${e(s.phone||'')}" placeholder="학생 본인의 번호"></label><div class="section-title"><h3>학부모 연락처</h3><button type="button" class="text-button" data-contact-action="add-guardian">${A.icon('plus')} 추가</button></div><div id="guardian-fields">${list.map(g=>guardianCard(g)).join('')}</div><p class="hint">기존 학부모의 문자 수신 체크는 즉시 저장돼요. 새 연락처는 학생 정보 저장 후 등록돼요. ‘설정 → 출석 문자 설정’에서 자동 발송을 켜 주세요.</p></section>`;
+    return `<section class="contact-fields" data-edit-student="${e(s.id||'')}"><div class="section-title"><h3>학생 연락처</h3><button type="button" class="text-button" data-contact-action="pick" data-target="student">${A.icon('users')} 연락처 선택</button></div><input type="hidden" name="contactId" value="${e(s.contactId||'')}"><label class="field"><span>학생 전화번호 <small style="display:inline">선택</small></span><input name="phone" type="tel" inputmode="tel" maxlength="30" value="${e(s.phone||'')}" placeholder="학생 본인의 번호"></label><div class="section-title"><h3>학부모 연락처</h3><button type="button" class="text-button" data-contact-action="add-guardian">${A.icon('plus')} 추가</button></div><div id="guardian-fields">${list.map(g=>guardianCard(g)).join('')}</div><p class="hint">기존 번호의 수신 체크는 즉시 저장돼요. 새 연락처나 변경한 번호는 학생 정보와 함께 저장돼요. ‘설정 → 출석 문자 설정’에서 자동 발송을 켜 주세요.</p></section>`;
   }
   function readFields(form){
     const fd=new FormData(form),raw=String(fd.get('phone')||''),phone=C.normalizePhone(raw);
@@ -197,6 +197,15 @@
     const card=input.closest('[data-guardian]'),id=card?.querySelector('input[type=hidden]')?.value;
     const student=state().students.find(s=>s.id===studentId),guardian=student?.guardians.find(g=>g.id===id);
     if(!guardian)return; // A new student/contact is a draft until its form is saved.
+    const feedback=card.querySelector('[data-guardian-save-state]');
+    // Consent belongs to a phone number. A replacement number is still a draft;
+    // toggling it must never enable or disable the old saved recipient.
+    if(C.normalizePhone(card.querySelector('input[type=tel]').value)!==C.normalizePhone(guardian.phone)){
+      feedback.textContent='입력 중인 번호의 수신 설정은 변경 저장을 누르면 함께 적용돼요. 저장된 번호의 설정은 유지됩니다.';
+      feedback.hidden=false;
+      return;
+    }
+    feedback.hidden=true;
     const next=C.clone(state());next.students.find(s=>s.id===studentId).guardians.find(g=>g.id===id).notify=input.checked;
     if(A.save(next,'학부모 문자 수신 설정을 저장했어요.')){
       $('#form-error')?.classList.remove('visible');
